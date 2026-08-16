@@ -34,7 +34,6 @@ export function App() {
 
   useEffect(() => {
     loadWorkspaces();
-    // Check if new user needs onboarding guide
     if (!StorageService.isOnboardingCompleted()) {
       setIsOnboardingOpen(true);
     }
@@ -115,12 +114,11 @@ export function App() {
   const handleLaunch = async (workspace: Workspace) => {
     setLaunchingId(workspace.id);
 
-    // Trigger confetti celebration on launch start
     confetti({
-      particleCount: 45,
-      spread: 60,
-      origin: { y: 0.8 },
-      colors: ['#6366f1', '#10b981', '#38bdf8', '#a855f7'],
+      particleCount: 30,
+      spread: 45,
+      origin: { y: 0.85 },
+      colors: ['#FF6B6B', '#FFFFFF', '#4D96FF', '#6BCB77'],
     });
 
     const report = await LauncherService.launchWorkspace(workspace, (progress) => {
@@ -150,7 +148,6 @@ export function App() {
     setActiveReport(report);
     setLaunchingId(null);
 
-    // Update launch count stats
     const updated = workspaces.map((w) =>
       w.id === workspace.id
         ? {
@@ -186,9 +183,9 @@ export function App() {
         const imported = StorageService.importFromJson(content);
         setWorkspaces(imported);
         await StorageService.saveWorkspaces(imported);
-        showToast(`Successfully imported ${imported.length} workspaces!`);
+        showToast(`Imported ${imported.length} workspaces`);
       } catch (err: unknown) {
-        alert(err instanceof Error ? err.message : 'Invalid JSON file format.');
+        alert(err instanceof Error ? err.message : 'Invalid JSON format.');
       }
     };
     reader.readAsText(file);
@@ -214,159 +211,159 @@ export function App() {
   const totalActionsCount = workspaces.reduce((acc, w) => acc + w.actions.length, 0);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500 selection:text-white">
-      {/* Background ambient lighting */}
+    <div className="min-h-screen bg-[#121214] text-neutral-200 flex flex-col font-sans antialiased selection:bg-red-500/30 selection:text-white">
+      {/* Raycast Ambient Vignette Background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-40 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl" />
-        <div className="absolute top-1/3 -right-20 w-80 h-80 bg-cyan-600/10 rounded-full blur-3xl" />
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[300px] bg-red-500/[0.03] rounded-full blur-[120px]" />
       </div>
 
-      {/* Main Top Header */}
-      <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-xl px-6 py-4">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-          {/* Brand Logo & Tagline */}
-          <div className="flex items-center space-x-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-              <Zap className="w-5 h-5 text-white" />
+      {/* Raycast Translucent Navigation Topbar */}
+      <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-[#1e1e20]/80 backdrop-blur-2xl px-4 py-2.5">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
+          {/* App Branding */}
+          <div className="flex items-center space-x-2.5">
+            <div className="w-6 h-6 rounded-md bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 shadow-sm">
+              <Zap className="w-3.5 h-3.5" />
             </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-xl font-black tracking-tight text-white">InFlow</h1>
-                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  {isTauri ? 'Desktop v2' : 'Web Simulator'}
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">One click to enter any work mode.</p>
+            <div className="flex items-center space-x-2">
+              <h1 className="text-xs font-semibold tracking-tight text-white">InFlow</h1>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-neutral-400 border border-white/10">
+                {isTauri ? 'Windows Desktop' : 'Web Simulator'}
+              </span>
             </div>
           </div>
 
-          {/* Header Action Tools */}
-          <div className="flex items-center flex-wrap gap-2">
-            {/* Search input */}
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          {/* Action Toolbar */}
+          <div className="flex items-center space-x-1.5">
+            {/* Search Input with Shortcut Cue */}
+            <div className="relative flex items-center">
+              <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 pointer-events-none" />
               <input
                 type="text"
+                placeholder="Search command or workspace..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-slate-900/90 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500 w-44 sm:w-56"
+                className="pl-8 pr-8 h-7 bg-neutral-900/80 border border-white/10 rounded-md text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50 w-40 sm:w-60 transition-all"
                 aria-label="Search workflows"
               />
+              <kbd className="hidden sm:inline-block absolute right-2 text-[9px] font-mono text-neutral-400 border border-white/10 px-1 rounded bg-white/5">
+                /
+              </kbd>
             </div>
 
-            {/* Guide Button */}
+            <div className="h-4 w-[1px] bg-white/10 mx-1" />
+
+            {/* Icon Utility Buttons */}
             <button
               onClick={() => setIsOnboardingOpen(true)}
-              title="Open User Guide"
-              className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-indigo-300 transition-colors"
+              title="User Guide"
+              className="w-7 h-7 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white transition-colors"
             >
-              <HelpCircle className="w-4 h-4" />
+              <HelpCircle className="w-3.5 h-3.5" />
             </button>
 
-            {/* Templates Gallery Button */}
             <button
               onClick={() => setIsTemplateModalOpen(true)}
-              title="Browse Ready-made Templates"
-              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-xl text-slate-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition-colors"
+              title="Browse Templates"
+              className="h-7 px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition-colors"
             >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="hidden sm:inline">Templates</span>
+              <Sparkles className="w-3 h-3 text-red-400" />
+              <span className="hidden sm:inline text-[11px]">Templates</span>
             </button>
 
-            {/* Import / Export JSON */}
             <label
-              className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-slate-200 cursor-pointer transition-colors"
-              title="Import JSON"
+              className="w-7 h-7 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white cursor-pointer transition-colors"
+              title="Import Config"
             >
-              <Upload className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5" />
               <input type="file" accept=".json" onChange={handleImport} className="hidden" />
             </label>
+
             <button
               onClick={handleExport}
-              title="Export Workspaces as JSON"
-              className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-slate-200 transition-colors"
+              title="Export Config"
+              className="w-7 h-7 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white transition-colors"
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-3.5 h-3.5" />
             </button>
 
-            {/* Create Workspace Button */}
+            {/* Primary Action Button */}
             <button
               onClick={() => {
                 setEditingWorkspace(null);
                 setIsModalOpen(true);
               }}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 flex items-center space-x-1.5 transition-all transform active:scale-98"
+              className="h-7 px-2.5 bg-red-500 hover:bg-red-600 text-white rounded-md text-xs font-medium shadow-sm flex items-center space-x-1 transition-all active:scale-[0.98]"
             >
-              <Plus className="w-4 h-4" />
-              <span>+ Add Workspace</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>New</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8 z-10">
-        {/* Quick Insights Banner */}
-        <div className="mb-8 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl">
-            <span className="text-xs text-slate-400">Total Workspaces</span>
-            <div className="text-lg font-bold text-white mt-0.5">{workspaces.length}</div>
+      <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-5 z-10">
+        {/* Compact HUD Stats Ribbon */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
+          <div className="p-2.5 bg-[#1e1e20]/50 border border-white/[0.06] rounded-lg shadow-sm backdrop-blur-md">
+            <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Workspaces</span>
+            <div className="text-sm font-medium text-white mt-0.5">{workspaces.length}</div>
           </div>
-          <div className="p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl">
-            <span className="text-xs text-slate-400">Pipelines / Actions</span>
-            <div className="text-lg font-bold text-indigo-400 mt-0.5">{totalActionsCount}</div>
+          <div className="p-2.5 bg-[#1e1e20]/50 border border-white/[0.06] rounded-lg shadow-sm backdrop-blur-md">
+            <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Actions</span>
+            <div className="text-sm font-medium text-white mt-0.5">{totalActionsCount}</div>
           </div>
-          <div className="p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl">
-            <span className="text-xs text-slate-400">Total Launches</span>
-            <div className="text-lg font-bold text-emerald-400 mt-0.5">
+          <div className="p-2.5 bg-[#1e1e20]/50 border border-white/[0.06] rounded-lg shadow-sm backdrop-blur-md">
+            <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Launches</span>
+            <div className="text-sm font-medium text-white mt-0.5">
               {workspaces.reduce((acc, w) => acc + (w.launchCount || 0), 0)}
             </div>
           </div>
-          <div className="p-3.5 bg-slate-900/60 border border-slate-800/80 rounded-2xl">
-            <span className="text-xs text-slate-400">Environment</span>
-            <div className="text-sm font-semibold text-cyan-400 mt-1 flex items-center space-x-1.5">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-              <span>{isTauri ? 'Windows Native' : 'Active Ready'}</span>
+          <div className="p-2.5 bg-[#1e1e20]/50 border border-white/[0.06] rounded-lg shadow-sm backdrop-blur-md">
+            <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Runtime</span>
+            <div className="text-xs font-medium text-neutral-300 mt-1 flex items-center space-x-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <span>{isTauri ? 'Windows App' : 'Web Sandbox'}</span>
             </div>
           </div>
         </div>
 
-        {/* Workspaces Grid or Empty State */}
+        {/* Workspaces Grid / Raycast Empty View */}
         {filteredWorkspaces.length === 0 ? (
-          <div className="text-center py-20 px-4 border border-dashed border-slate-800/90 rounded-3xl bg-slate-900/30 backdrop-blur-sm max-w-2xl mx-auto">
-            <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-3xl w-20 h-20 mx-auto flex items-center justify-center text-indigo-400 mb-5 shadow-inner">
-              <Layers className="w-10 h-10" />
+          <div className="text-center py-14 px-4 border border-white/[0.08] rounded-xl bg-[#1e1e20]/40 backdrop-blur-xl max-w-sm mx-auto shadow-2xl">
+            <div className="w-9 h-9 rounded-md bg-white/5 border border-white/10 mx-auto flex items-center justify-center text-neutral-400 mb-2.5">
+              <Layers className="w-4 h-4" />
             </div>
-            <h3 className="text-xl font-bold text-white tracking-tight">
-              {searchQuery ? 'No Matching Workspaces' : 'No Workspaces Yet'}
+            <h3 className="text-xs font-semibold text-white tracking-tight">
+              {searchQuery ? 'No Results Found' : 'No Workspaces Configured'}
             </h3>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto mt-2 mb-8 leading-relaxed">
+            <p className="text-[11px] text-neutral-400 max-w-xs mx-auto mt-1 mb-4 leading-normal">
               {searchQuery
-                ? `No workspaces match "${searchQuery}". Try a different keyword.`
-                : 'Create your first workspace from scratch or pick a pre-configured template to start launching your daily tools with one click.'}
+                ? `No workflows matching "${searchQuery}".`
+                : 'Create automated workflows to launch apps, local directories, and websites.'}
             </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <div className="flex items-center justify-center gap-2">
               <button
                 onClick={() => {
                   setEditingWorkspace(null);
                   setIsModalOpen(true);
                 }}
-                className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-xs sm:text-sm font-semibold shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all transform active:scale-95"
+                className="h-7 px-3 bg-red-500 hover:bg-red-600 text-white rounded-md text-xs font-medium flex items-center space-x-1 transition-all"
               >
-                <Plus className="w-4 h-4" />
-                <span>+ Create Workspace</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>Create Workspace</span>
               </button>
               <button
                 onClick={() => setIsTemplateModalOpen(true)}
-                className="w-full sm:w-auto px-6 py-3 bg-slate-800/80 hover:bg-slate-800 text-slate-200 border border-slate-700/80 hover:border-slate-600 rounded-2xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-2 transition-all transform active:scale-95"
+                className="h-7 px-3 bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10 rounded-md text-xs font-medium transition-colors"
               >
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-                <span>Choose from Templates</span>
+                Templates
               </button>
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {filteredWorkspaces.map((workspace) => (
               <WorkspaceCard
                 key={workspace.id}
@@ -385,10 +382,10 @@ export function App() {
         )}
       </main>
 
-      {/* Floating Status Notification */}
+      {/* Raycast Floating HUD Toast */}
       {toastMessage && (
-        <div className="fixed top-20 right-6 z-50 px-4 py-2.5 bg-indigo-600 text-white rounded-xl shadow-xl text-xs font-medium flex items-center space-x-2 animate-fade-in">
-          <CheckCircle2 className="w-4 h-4" />
+        <div className="fixed bottom-4 right-4 z-50 px-3 py-1.5 bg-[#1e1e20]/90 text-white border border-white/10 rounded-md shadow-2xl text-xs font-medium flex items-center space-x-2 animate-fade-in backdrop-blur-2xl">
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
           <span>{toastMessage}</span>
         </div>
       )}
@@ -396,7 +393,7 @@ export function App() {
       {/* Execution Tracker Overlay */}
       <LaunchOverlay report={activeReport} onClose={() => setActiveReport(null)} />
 
-      {/* Workspace Creation & Edit Modal */}
+      {/* Workspace Modal */}
       <WorkspaceModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -404,14 +401,14 @@ export function App() {
         initialWorkspace={editingWorkspace}
       />
 
-      {/* Ready-made Template Gallery */}
+      {/* Template Gallery */}
       <TemplateModal
         isOpen={isTemplateModalOpen}
         onClose={() => setIsTemplateModalOpen(false)}
         onSelectTemplate={handleSelectTemplate}
       />
 
-      {/* Onboarding Guide Modal */}
+      {/* Onboarding Guide */}
       <OnboardingModal
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}

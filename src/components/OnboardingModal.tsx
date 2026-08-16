@@ -32,22 +32,20 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       badge: 'Step 1 of 3 • Introduction',
       subtitle: 'Your single-click workspace & workflow automation launcher.',
       description:
-        'Instead of opening 5 browser tabs, 2 project folders, documentation, and your code editor one by one every morning, InFlow executes your complete work setup in under a second.',
+        'Instead of opening browser tabs, local project folders, docs, and code editors manually, InFlow orchestrates your complete work setup instantly.',
       icon: Zap,
-      accentColor: 'indigo',
       highlights: [
         'Instant multi-target launch sequence',
         'Built for developers, researchers & power users',
         'Works seamlessly on Windows desktop & web',
       ],
       previewGraphic: (
-        <div className="relative w-full h-44 rounded-2xl bg-gradient-to-br from-indigo-950/60 via-slate-900 to-slate-950 border border-indigo-500/30 p-4 flex flex-col justify-center items-center overflow-hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-500/20 via-transparent to-transparent" />
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/40 mb-3 animate-bounce">
-            <Zap className="w-7 h-7 text-white" />
+        <div className="relative w-full h-32 rounded-lg bg-black/40 border border-white/5 p-4 flex flex-col justify-center items-center overflow-hidden">
+          <div className="w-9 h-9 rounded-md bg-red-500/20 border border-red-500/30 flex items-center justify-center mb-2 text-red-400">
+            <Zap className="w-4 h-4" />
           </div>
-          <span className="text-sm font-bold text-white tracking-wide">One Click → Complete Flow</span>
-          <span className="text-xs text-indigo-300/80 mt-1">Zero manual setup time</span>
+          <span className="text-xs font-semibold text-white tracking-tight">One Click → Complete Flow</span>
+          <span className="text-[10px] font-mono text-neutral-400 mt-0.5">Zero setup latency</span>
         </div>
       ),
     },
@@ -56,27 +54,26 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       badge: 'Step 2 of 3 • Custom Pipelines',
       subtitle: 'Chain web links, local project folders, files, and apps.',
       description:
-        'Create tailor-made workspaces for your routines: DSA Daily Prep, Full-Stack Development, Career & Job Hunting, Content Creation, or Deep Research.',
+        'Create tailor-made workspaces for your daily routines: DSA Daily Prep, Full-Stack Development, Career Planning, or Deep Research.',
       icon: Layers,
-      accentColor: 'emerald',
       highlights: [
         'Chain multiple URLs, local folders, files & executable apps',
         'Pick from ready-made curated templates or build from scratch',
         'Drag & reorder actions to prioritize launch sequence',
       ],
       previewGraphic: (
-        <div className="relative w-full h-44 rounded-2xl bg-slate-900 border border-emerald-500/30 p-3.5 flex flex-col justify-center space-y-2 overflow-hidden">
-          <div className="flex items-center space-x-2.5 p-2 rounded-xl bg-slate-800/80 border border-emerald-500/20">
-            <span className="text-xs px-2 py-0.5 rounded-md bg-sky-500/20 text-sky-300 font-mono">URL</span>
-            <span className="text-xs text-slate-200 truncate">https://leetcode.com/problems</span>
+        <div className="relative w-full h-32 rounded-lg bg-black/40 border border-white/5 p-2.5 flex flex-col justify-center space-y-1 overflow-hidden">
+          <div className="flex items-center space-x-2 p-1.5 rounded-md bg-white/5 border border-white/5">
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-mono">URL</span>
+            <span className="text-[10px] text-neutral-300 font-mono truncate">https://leetcode.com/problems</span>
           </div>
-          <div className="flex items-center space-x-2.5 p-2 rounded-xl bg-slate-800/80 border border-emerald-500/20">
-            <span className="text-xs px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-mono">FOLDER</span>
-            <span className="text-xs text-slate-200 truncate">D:\Projects\FullStack-App</span>
+          <div className="flex items-center space-x-2 p-1.5 rounded-md bg-white/5 border border-white/5">
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">FOLDER</span>
+            <span className="text-[10px] text-neutral-300 font-mono truncate">~/Projects/FullStack-App</span>
           </div>
-          <div className="flex items-center space-x-2.5 p-2 rounded-xl bg-slate-800/80 border border-emerald-500/20">
-            <span className="text-xs px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 font-mono">APP</span>
-            <span className="text-xs text-slate-200 truncate">code . (Visual Studio Code)</span>
+          <div className="flex items-center space-x-2 p-1.5 rounded-md bg-white/5 border border-white/5">
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">APP</span>
+            <span className="text-[10px] text-neutral-300 font-mono truncate">code . (Visual Studio Code)</span>
           </div>
         </div>
       ),
@@ -86,22 +83,21 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       badge: 'Step 3 of 3 • Ready to Flow',
       subtitle: 'Launch, track progress live, and stay in the zone.',
       description:
-        'Hit "Launch Mode" on any workspace card. InFlow handles the orchestration with live execution telemetry, so you can dive straight into high-leverage work.',
+        'Trigger "Launch Mode" on any workspace. InFlow handles execution with live telemetry so you can jump straight into high-leverage work.',
       icon: Sparkles,
-      accentColor: 'cyan',
       highlights: [
-        'Live execution progress overlay with instant error diagnostic',
+        'Live execution progress overlay with diagnostic feedback',
         'Export & Import JSON configurations to backup your setup',
         'Fast & lightweight with minimal memory footprint',
       ],
       previewGraphic: (
-        <div className="relative w-full h-44 rounded-2xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-950 border border-cyan-500/30 p-4 flex flex-col justify-center items-center overflow-hidden text-center">
-          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-medium mb-3">
-            <ShieldCheck className="w-4 h-4" />
+        <div className="relative w-full h-32 rounded-lg bg-black/40 border border-white/5 p-4 flex flex-col justify-center items-center overflow-hidden text-center">
+          <div className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[11px] font-medium mb-1.5">
+            <ShieldCheck className="w-3.5 h-3.5" />
             <span>Ready for Action</span>
           </div>
-          <p className="text-xs text-slate-300 max-w-xs">
-            You're all set! Start with a clean workspace or choose from pre-made templates.
+          <p className="text-[11px] text-neutral-400 max-w-xs leading-normal">
+            You're all set. Start with a clean workspace or select a preset pipeline template.
           </p>
         </div>
       ),
@@ -126,65 +122,65 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-xl bg-slate-900 border border-slate-800/90 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-        {/* Top subtle bar with close/skip */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/70">
-          <div className="flex items-center space-x-2">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-0.5 rounded-full">
-              {slide.badge}
-            </span>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-md animate-fade-in font-sans">
+      <div className="relative w-full max-w-md bg-[#1e1e20]/80 backdrop-blur-2xl border border-white/10 rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.7)] overflow-hidden flex flex-col text-neutral-200">
+        {/* Top Header */}
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06] bg-white/[0.02]">
+          <span className="text-[9px] font-mono uppercase tracking-wider text-neutral-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded">
+            {slide.badge}
+          </span>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 p-1.5 rounded-xl hover:bg-slate-800 transition-colors"
+            type="button"
+            className="text-neutral-400 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors"
             title="Close Guide"
           >
-            <X className="w-5 h-5" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 sm:p-8 space-y-6 flex-1">
+        <div className="p-4 space-y-3.5 flex-1">
           {/* Interactive Preview Graphics */}
           {slide.previewGraphic}
 
           {/* Heading and Description */}
           <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-              <span>{slide.title}</span>
+            <h2 className="text-sm font-semibold text-white tracking-tight">
+              {slide.title}
             </h2>
-            <p className="text-xs sm:text-sm font-medium text-indigo-400/90 mt-1">
+            <p className="text-[11px] text-neutral-400 mt-0.5">
               {slide.subtitle}
             </p>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mt-2.5">
+            <p className="text-[11px] text-neutral-300 leading-normal mt-1.5">
               {slide.description}
             </p>
           </div>
 
-          {/* Highlights checklist */}
-          <div className="space-y-2 bg-slate-950/40 p-3.5 rounded-2xl border border-slate-800/60">
+          {/* Highlights Checklist */}
+          <div className="space-y-1 bg-black/40 p-2.5 rounded-lg border border-white/5">
             {slide.highlights.map((highlight, idx) => (
-              <div key={idx} className="flex items-start space-x-2 text-xs text-slate-300">
-                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>{highlight}</span>
+              <div key={idx} className="flex items-center space-x-2 text-xs text-neutral-300">
+                <CheckCircle className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span className="text-[10px]">{highlight}</span>
               </div>
             ))}
           </div>
         </div>
 
         {/* Footer Navigation Bar */}
-        <div className="flex items-center justify-between px-6 py-4 bg-slate-950/60 border-t border-slate-800/80">
-          {/* Step dots */}
-          <div className="flex items-center space-x-2">
+        <div className="flex items-center justify-between px-4 py-2.5 bg-black/30 border-t border-white/[0.06]">
+          {/* Step Dots */}
+          <div className="flex items-center space-x-1.5">
             {slides.map((_, idx) => (
               <button
                 key={idx}
+                type="button"
                 onClick={() => setCurrentStep(idx)}
-                className={`h-2 rounded-full transition-all ${
+                className={`h-1 rounded-full transition-all ${
                   currentStep === idx
-                    ? 'w-6 bg-indigo-500 shadow-sm shadow-indigo-500/50'
-                    : 'w-2 bg-slate-700 hover:bg-slate-600'
+                    ? 'w-3.5 bg-red-500'
+                    : 'w-1 bg-white/20 hover:bg-white/40'
                 }`}
                 title={`Go to step ${idx + 1}`}
               />
@@ -192,14 +188,14 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-1.5">
             {currentStep > 0 && (
               <button
                 type="button"
                 onClick={handleBack}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors flex items-center space-x-1.5"
+                className="px-2.5 py-1 rounded-md text-xs font-medium text-neutral-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-colors flex items-center space-x-1"
               >
-                <ArrowLeft className="w-3.5 h-3.5" />
+                <ArrowLeft className="w-3 h-3" />
                 <span>Back</span>
               </button>
             )}
@@ -207,10 +203,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <button
               type="button"
               onClick={handleNext}
-              className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 transition-all flex items-center space-x-2 transform active:scale-95"
+              className="px-3 py-1 rounded-md text-xs font-medium text-white bg-red-500 hover:bg-red-600 transition-all flex items-center space-x-1 shadow-sm active:scale-[0.98]"
             >
               <span>{isLastStep ? 'Get Started' : 'Next'}</span>
-              {isLastStep ? <Play className="w-3.5 h-3.5 fill-current" /> : <ArrowRight className="w-3.5 h-3.5" />}
+              {isLastStep ? <Play className="w-3 h-3 fill-current" /> : <ArrowRight className="w-3 h-3" />}
             </button>
           </div>
         </div>

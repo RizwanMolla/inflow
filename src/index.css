@@ -2,84 +2,97 @@
 
 @layer base {
   :root {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+    --background: 240 4% 8%; /* Raycast dark charcoal background (#121214) */
+    --foreground: 0 0% 98%;   /* High-contrast primary text (#FAFAFA) */
   }
 
   body {
-    background-color: #090d16;
-    color: #f8fafc;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    background-color: #121214;
+    color: #FAFAFA;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+    letter-spacing: -0.011em;
     overflow-x: hidden;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Precision Ultra-Thin Scrollbar (Raycast & macOS HUD Style) */
+::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
 }
 
-::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.8);
-  border-radius: 4px;
+::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 1);
+::-webkit-scrollbar-thumb:hover,
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 
-/* Glassmorphism & Glow styles */
+/* Glassmorphism & Raycast Native Surfaces */
 .glass-panel {
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(30, 30, 32, 0.82);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
 }
 
 .glass-card {
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  background: rgba(30, 30, 32, 0.5);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.4);
+  transition: background-color 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.12s ease;
 }
 
 .glass-card:hover {
-  border-color: rgba(255, 255, 255, 0.18);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 0 20px -5px rgba(99, 102, 241, 0.15);
-  transform: translateY(-2px);
+  background: rgba(30, 30, 32, 0.85);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.6);
+  transform: none; /* Raycast avoids transform elevations for crisp desktop alignment */
 }
 
-/* Sub-card item styling */
+/* High-Density Action Item Rows */
 .action-item-row {
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: all 0.15s ease;
+  border-radius: 6px;
+  transition: background-color 0.1s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.1s ease;
 }
 
-.action-item-row:hover {
-  background: rgba(30, 41, 59, 0.8);
+.action-item-row:hover,
+.action-item-row[data-active="true"] {
+  background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.12);
 }
 
-/* Animation utilities */
-@keyframes pulseGlow {
+/* Subtle Ambient Glow for Focused/Active Elements */
+@keyframes raycastPulse {
   0%, 100% {
-    opacity: 0.4;
-    transform: scale(1);
+    opacity: 0.25;
   }
   50% {
-    opacity: 0.8;
-    transform: scale(1.05);
+    opacity: 0.55;
   }
 }
 
 .animate-glow {
-  animation: pulseGlow 3s infinite ease-in-out;
+  animation: raycastPulse 4s infinite ease-in-out;
 }

@@ -5,7 +5,15 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:allow-open",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        {
+          "name": "any-url-or-path",
+          "path": "**"
+        }
+      ]
+    },
     "shell:allow-execute",
     {
       "identifier": "shell:allow-execute",
@@ -14,9 +22,15 @@
           "name": "run-cmd",
           "cmd": "cmd.exe",
           "args": true
+        },
+        {
+          "name": "run-ps",
+          "cmd": "powershell.exe",
+          "args": true
         }
       ]
     },
-    "store:default"
+    "store:default",
+    "dialog:default"
   ]
 }

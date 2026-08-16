@@ -28,25 +28,37 @@ export class LauncherService {
           case 'url': {
             // Validate URL protocol if missing
             const validUrl = /^https?:\/\//i.test(target) ? target : `https://${target}`;
-            await open(validUrl);
+            try {
+              await open(validUrl);
+            } catch {
+              const command = Command.create('run-cmd', ['/C', 'start', '', validUrl]);
+              await command.execute();
+            }
             break;
           }
           case 'folder':
           case 'file': {
-            await open(target);
+            // Open local file / folder with Windows default associated program
+            try {
+              const command = Command.create('run-cmd', ['/C', 'start', '', target]);
+              const child = await command.execute();
+              if (child.code !== 0 && child.stderr) {
+                await open(target);
+              }
+            } catch {
+              await open(target);
+            }
             break;
           }
           case 'app': {
             // Spawn app using cmd.exe /C start or direct execute
             try {
-              // Attempt launching command / program via Windows cmd
               const command = Command.create('run-cmd', ['/C', 'start', '', target]);
               const child = await command.execute();
               if (child.code !== 0 && child.stderr) {
                 throw new Error(child.stderr);
               }
             } catch {
-              // Fallback to open
               await open(target);
             }
             break;

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/2.0/tooling/cli/schema.json",
+  "identifier": "default",
+  "description": "Default permissions for InFlow application",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "shell:allow-execute",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "run-cmd",
+          "cmd": "cmd.exe",
+          "args": true
+        }
+      ]
+    },
+    "store:default"
+  ]
+}

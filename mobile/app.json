@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "InFlow Mobile",
+    "slug": "inflow-mobile",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d0d0f",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow InFlow to scan the desktop QR code for pairing."
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0d0d0f",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "permissions": [
+        "CAMERA"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

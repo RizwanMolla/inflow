@@ -43,3 +43,53 @@ export interface LaunchReport {
   progressList: ActionExecutionProgress[];
   isComplete: boolean;
 }
+
+// --- Mobile Deck Configuration Types ---
+export type GridDimension = '2x3' | '3x4'; // 2 rows x 3 cols (6 slots) or 3 rows x 4 cols (12 slots)
+export type DeckItemType = 'workspace' | 'quick_action' | 'empty';
+
+export interface DeckSlot {
+  id: string;                // e.g. "slot-p0-0"
+  type: DeckItemType;
+  targetId?: string;         // workspace.id or action.id
+  targetWorkspaceId?: string;// parent workspace ID if type === 'quick_action'
+  label: string;             // Custom button label
+  icon: string;              // Icon key or emoji
+  accentColor?: AccentColor; // Custom button accent color
+}
+
+export interface DeckPage {
+  id: string;                // "workspaces" | "quick_actions" or custom
+  title: string;             // "Workspaces" | "Quick Actions"
+  slots: DeckSlot[];
+}
+
+export interface DeckConfig {
+  version: number;
+  gridDimension: GridDimension;
+  activePageId: string;
+  pages: DeckPage[];
+  updatedAt: string;
+}
+
+// --- WebSocket & Server Event Payloads ---
+export type WebSocketMessageType =
+  | 'DECK_CONFIG_UPDATE'
+  | 'ACTIVE_WORKSPACE_CHANGE'
+  | 'TRIGGER_LAUNCH'
+  | 'CLIENT_CONNECTED'
+  | 'PING'
+  | 'PONG';
+
+export interface WebSocketMessage<T = unknown> {
+  type: WebSocketMessageType;
+  payload: T;
+}
+
+export interface ServerStatus {
+  ip: string;
+  port: number;
+  connectedClients: number;
+  activeWorkspaceId: string | null;
+  serverVersion: string;
+}

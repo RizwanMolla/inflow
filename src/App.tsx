@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus,
   Search,
@@ -9,9 +9,11 @@ import {
   CheckCircle2,
   Sparkles,
   HelpCircle,
+  Smartphone,
+  QrCode,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import type { Workspace, LaunchReport } from './types/workspace';
+import type { Workspace, LaunchReport, DeckConfig } from './types/workspace';
 import { StorageService, isTauriEnvironment } from './services/storage';
 import { LauncherService } from './services/launcher';
 import { WorkspaceCard } from './components/WorkspaceCard';
@@ -19,24 +21,74 @@ import { WorkspaceModal } from './components/WorkspaceModal';
 import { LaunchOverlay } from './components/LaunchOverlay';
 import { OnboardingModal } from './components/OnboardingModal';
 import { TemplateModal } from './components/TemplateModal';
+import { QRPairingModal } from './components/QRPairingModal';
+import { MobileDeckModal } from './components/MobileDeckModal';
+import { generateDefaultDeckConfig } from './data/deckDefaults';
 
 export function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [deckConfig, setDeckConfig] = useState<DeckConfig>(() => generateDefaultDeckConfig([]));
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isQRPairingOpen, setIsQRPairingOpen] = useState(false);
+  const [isMobileDeckOpen, setIsMobileDeckOpen] = useState(false);
   const [editingWorkspace, setEditingWorkspace] = useState<Workspace | null>(null);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<LaunchReport | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const isTauri = isTauriEnvironment();
+  const workspacesRef = useRef<Workspace[]>(workspaces);
+  workspacesRef.current = workspaces;
 
   useEffect(() => {
-    loadWorkspaces();
+    loadInitialData();
     if (!StorageService.isOnboardingCompleted()) {
       setIsOnboardingOpen(true);
     }
+
+    // Set up Tauri event listener for remote triggers from embedded Axum / WebSocket server
+    let isSubscribed = true;
+    let unlistenFn: (() => void) | null = null;
+
+    if (isTauri) {
+      import('@tauri-apps/api/event').then(({ listen }) => {
+        if (!isSubscribed) return;
+        listen<{ workspaceId: string; actionId?: string }>('remote-launch-trigger', async (event) => {
+          const { workspaceId, actionId } = event.payload;
+          
+          const currentWorkspaces = await StorageService.loadWorkspaces();
+          const targetWs = currentWorkspaces.find((w) => w.id === workspaceId);
+          
+          if (targetWs) {
+            if (actionId) {
+              const specificAction = targetWs.actions.find((a) => a.id === actionId);
+              if (specificAction) {
+                await LauncherService.executeAction(specificAction);
+                showToast(`Remote Action: ${specificAction.label}`);
+                return;
+              }
+            }
+            await handleLaunch(targetWs);
+            showToast(`Remote Trigger: ${targetWs.name}`);
+          }
+        }).then((unlisten) => {
+          if (!isSubscribed) {
+            unlisten();
+          } else {
+            unlistenFn = unlisten;
+          }
+        });
+      });
+    }
+
+    return () => {
+      isSubscribed = false;
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
   }, []);
 
   const showToast = (msg: string) => {
@@ -44,23 +96,26 @@ export function App() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const loadWorkspaces = async () => {
-    const data = await StorageService.loadWorkspaces();
-    setWorkspaces(data);
+  const loadInitialData = async () => {
+    const wsData = await StorageService.loadWorkspaces();
+    setWorkspaces(wsData);
+    const deckData = await StorageService.loadDeckConfig(wsData);
+    setDeckConfig(deckData);
   };
 
   const handleSaveWorkspace = async (saved: Workspace) => {
-    const exists = workspaces.some((w) => w.id === saved.id);
-    let updated: Workspace[];
-    if (exists) {
-      updated = workspaces.map((w) => (w.id === saved.id ? saved : w));
-      showToast(`Updated "${saved.name}"`);
-    } else {
-      updated = [saved, ...workspaces];
-      showToast(`Created "${saved.name}"`);
-    }
-    setWorkspaces(updated);
-    await StorageService.saveWorkspaces(updated);
+    setWorkspaces((prev) => {
+      const exists = prev.some((w) => w.id === saved.id);
+      const updated = exists ? prev.map((w) => (w.id === saved.id ? saved : w)) : [saved, ...prev];
+      StorageService.saveWorkspaces(updated);
+      showToast(exists ? `Updated "${saved.name}"` : `Created "${saved.name}"`);
+      return updated;
+    });
+  };
+
+  const handleSaveDeckConfig = async (newConfig: DeckConfig) => {
+    setDeckConfig(newConfig);
+    await StorageService.saveDeckConfig(newConfig);
   };
 
   const handleSelectTemplate = async (template: Workspace) => {
@@ -75,20 +130,24 @@ export function App() {
         id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       })),
     };
-    const updated = [newWs, ...workspaces];
-    setWorkspaces(updated);
-    await StorageService.saveWorkspaces(updated);
+    setWorkspaces((prev) => {
+      const updated = [newWs, ...prev];
+      StorageService.saveWorkspaces(updated);
+      return updated;
+    });
     setIsTemplateModalOpen(false);
     showToast(`Added workspace from template "${template.name}"`);
   };
 
   const handleDeleteWorkspace = async (id: string) => {
-    const target = workspaces.find((w) => w.id === id);
+    const target = workspacesRef.current.find((w) => w.id === id);
     if (!target) return;
     if (window.confirm(`Are you sure you want to delete "${target.name}"?`)) {
-      const updated = workspaces.filter((w) => w.id !== id);
-      setWorkspaces(updated);
-      await StorageService.saveWorkspaces(updated);
+      setWorkspaces((prev) => {
+        const updated = prev.filter((w) => w.id !== id);
+        StorageService.saveWorkspaces(updated);
+        return updated;
+      });
       showToast(`Deleted "${target.name}"`);
     }
   };
@@ -105,9 +164,11 @@ export function App() {
         id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       })),
     };
-    const updated = [duplicated, ...workspaces];
-    setWorkspaces(updated);
-    await StorageService.saveWorkspaces(updated);
+    setWorkspaces((prev) => {
+      const updated = [duplicated, ...prev];
+      StorageService.saveWorkspaces(updated);
+      return updated;
+    });
     showToast(`Duplicated "${workspace.name}"`);
   };
 
@@ -148,21 +209,23 @@ export function App() {
     setActiveReport(report);
     setLaunchingId(null);
 
-    const updated = workspaces.map((w) =>
-      w.id === workspace.id
-        ? {
-            ...w,
-            launchCount: (w.launchCount || 0) + 1,
-            lastLaunchedAt: new Date().toISOString(),
-          }
-        : w
-    );
-    setWorkspaces(updated);
-    await StorageService.saveWorkspaces(updated);
+    setWorkspaces((prevWorkspaces) => {
+      const updated = prevWorkspaces.map((w) =>
+        w.id === workspace.id
+          ? {
+              ...w,
+              launchCount: (w.launchCount || 0) + 1,
+              lastLaunchedAt: new Date().toISOString(),
+            }
+          : w
+      );
+      StorageService.saveWorkspaces(updated);
+      return updated;
+    });
   };
 
   const handleExport = () => {
-    const jsonStr = StorageService.exportToJson(workspaces);
+    const jsonStr = StorageService.exportToJson(workspaces, deckConfig);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -170,7 +233,7 @@ export function App() {
     a.download = `inflow-workspaces-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast('Exported workspaces configuration');
+    showToast('Exported workspaces & deck configuration');
   };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -181,9 +244,13 @@ export function App() {
       try {
         const content = event.target?.result as string;
         const imported = StorageService.importFromJson(content);
-        setWorkspaces(imported);
-        await StorageService.saveWorkspaces(imported);
-        showToast(`Imported ${imported.length} workspaces`);
+        setWorkspaces(imported.workspaces);
+        await StorageService.saveWorkspaces(imported.workspaces);
+        if (imported.deckConfig) {
+          setDeckConfig(imported.deckConfig);
+          await StorageService.saveDeckConfig(imported.deckConfig);
+        }
+        showToast(`Imported ${imported.workspaces.length} workspaces`);
       } catch (err: unknown) {
         alert(err instanceof Error ? err.message : 'Invalid JSON format.');
       }
@@ -269,6 +336,25 @@ export function App() {
             >
               <Sparkles className="w-3 h-3 text-red-400" />
               <span className="hidden sm:inline text-[11px]">Templates</span>
+            </button>
+
+            {/* Mobile Deck & Pairing Actions */}
+            <button
+              onClick={() => setIsMobileDeckOpen(true)}
+              title="Configure Mobile Deck"
+              className="h-7 px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition-colors"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden md:inline text-[11px]">Mobile Deck</span>
+            </button>
+
+            <button
+              onClick={() => setIsQRPairingOpen(true)}
+              title="Pair Phone via QR Code"
+              className="h-7 px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition-colors"
+            >
+              <QrCode className="w-3.5 h-3.5 text-red-400" />
+              <span className="hidden md:inline text-[11px]">Pair QR</span>
             </button>
 
             <label
@@ -413,6 +499,22 @@ export function App() {
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}
         onComplete={handleOnboardingComplete}
+      />
+
+      {/* QR Pairing Modal */}
+      <QRPairingModal
+        isOpen={isQRPairingOpen}
+        onClose={() => setIsQRPairingOpen(false)}
+      />
+
+      {/* Mobile Deck Visual Configurator */}
+      <MobileDeckModal
+        isOpen={isMobileDeckOpen}
+        onClose={() => setIsMobileDeckOpen(false)}
+        workspaces={workspaces}
+        deckConfig={deckConfig}
+        onSaveDeckConfig={handleSaveDeckConfig}
+        onTriggerLaunch={handleLaunch}
       />
     </div>
   );

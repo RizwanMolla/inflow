@@ -27,6 +27,21 @@
           "name": "run-ps",
           "cmd": "powershell.exe",
           "args": true
+        },
+        {
+          "name": "run-explorer",
+          "cmd": "explorer",
+          "args": true
+        },
+        {
+          "name": "run-explorer-exe",
+          "cmd": "explorer.exe",
+          "args": true
+        },
+        {
+          "name": "run-start",
+          "cmd": "start",
+          "args": true
         }
       ]
     },

@@ -4,6 +4,12 @@
   :root {
     --background: 240 4% 8%; /* Raycast dark charcoal background (#121214) */
     --foreground: 0 0% 98%;   /* High-contrast primary text (#FAFAFA) */
+    font-size: 17px;          /* ~7-10% increase from standard 16px baseline */
+  }
+
+  html, body {
+    zoom: 1.075;               /* Uniform crisp 7.5% - 10% proportional scale across all UI aspects */
+    min-height: 100%;
   }
 
   body {

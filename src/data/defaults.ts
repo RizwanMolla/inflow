@@ -156,4 +156,4 @@ export const PRESET_TEMPLATES: Workspace[] = [
   },
 ];
 
-export const DEFAULT_WORKSPACES: Workspace[] = [];
+export const DEFAULT_WORKSPACES: Workspace[] = PRESET_TEMPLATES;

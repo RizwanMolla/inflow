@@ -45,7 +45,20 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
   );
 
   return (
-    <div className="group relative rounded-xl bg-[#1e1e20]/80 backdrop-blur-2xl border border-white/10 hover:border-white/20 transition-all duration-200 flex flex-col justify-between overflow-hidden shadow-lg text-neutral-200 font-sans">
+    <div
+      onClick={() => {
+        if (!isLaunching) onLaunch(workspace);
+      }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (!isLaunching) onLaunch(workspace);
+        }
+      }}
+      className="group relative rounded-xl bg-[#1e1e20]/80 backdrop-blur-2xl border border-white/10 hover:border-red-500/40 hover:bg-[#232326] transition-all duration-200 flex flex-col justify-between overflow-hidden shadow-lg text-neutral-200 font-sans cursor-pointer active:scale-[0.99] focus:outline-none focus:ring-1 focus:ring-red-500/50"
+    >
       {/* Top Accent Indicator */}
       <div className={`h-0.5 w-full bg-gradient-to-r ${accent.gradient.replace('from-', 'from-').replace('/20', '')}`} />
 
@@ -80,10 +93,16 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
             </div>
 
             {/* Quick Card Action Buttons */}
-            <div className="flex items-center space-x-0.5 opacity-60 group-hover:opacity-100 transition-opacity">
+            <div
+              className="flex items-center space-x-0.5 opacity-60 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
-                onClick={() => onDuplicate(workspace)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDuplicate(workspace);
+                }}
                 title="Duplicate Workspace"
                 className="p-1 text-neutral-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
               >
@@ -91,7 +110,10 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => onEdit(workspace)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(workspace);
+                }}
                 title="Edit Workspace"
                 className="p-1 text-neutral-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
               >
@@ -99,7 +121,10 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => onDelete(workspace.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(workspace.id);
+                }}
                 title="Delete Workspace"
                 className="p-1 text-neutral-400 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors"
               >
@@ -146,10 +171,16 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
 
         {/* Action Pipeline Accordion */}
         {workspace.actions.length > 0 && (
-          <div className="border-t border-white/[0.06] pt-2 mt-1">
+          <div
+            className="border-t border-white/[0.06] pt-2 mt-1"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               type="button"
-              onClick={() => setIsExpanded(!isExpanded)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsExpanded(!isExpanded);
+              }}
               className="w-full flex items-center justify-between text-[10px] text-neutral-400 hover:text-neutral-200 py-0.5 transition-colors font-mono"
             >
               <span>{isExpanded ? 'Hide Pipeline' : 'View Action Pipeline'}</span>

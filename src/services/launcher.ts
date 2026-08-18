@@ -22,45 +22,19 @@ export class LauncherService {
 
     try {
       if (isTauri) {
-        const { open, Command } = await import('@tauri-apps/plugin-shell');
+        const { open } = await import('@tauri-apps/plugin-shell');
 
         switch (action.type) {
           case 'url': {
-            // Validate URL protocol if missing
             const validUrl = /^https?:\/\//i.test(target) ? target : `https://${target}`;
-            try {
-              await open(validUrl);
-            } catch {
-              const command = Command.create('run-cmd', ['/C', 'start', '', validUrl]);
-              await command.execute();
-            }
+            await open(validUrl);
             break;
           }
           case 'folder':
-          case 'file': {
-            // Open local file / folder with Windows default associated program
-            try {
-              const command = Command.create('run-cmd', ['/C', 'start', '', target]);
-              const child = await command.execute();
-              if (child.code !== 0 && child.stderr) {
-                await open(target);
-              }
-            } catch {
-              await open(target);
-            }
-            break;
-          }
+          case 'file':
           case 'app': {
-            // Spawn app using cmd.exe /C start or direct execute
-            try {
-              const command = Command.create('run-cmd', ['/C', 'start', '', target]);
-              const child = await command.execute();
-              if (child.code !== 0 && child.stderr) {
-                throw new Error(child.stderr);
-              }
-            } catch {
-              await open(target);
-            }
+            const normalizedTarget = target.replace(/\\/g, '/');
+            await open(normalizedTarget);
             break;
           }
         }

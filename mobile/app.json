@@ -24,11 +24,19 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "permissions": [
-        "CAMERA"
-      ]
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.rizwan711410.inflowmobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "68c839bc-ec52-4a95-874a-b6ce693e9038"
+      }
     }
   }
 }

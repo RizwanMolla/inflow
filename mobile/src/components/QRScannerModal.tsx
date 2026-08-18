@@ -72,20 +72,22 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                 </TouchableOpacity>
               </View>
             ) : (
-              <CameraView
-                style={StyleSheet.absoluteFill}
-                barcodeScannerSettings={{
-                  barcodeTypes: ['qr'],
-                }}
-                onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-              >
-                <View style={styles.scannerOverlay}>
+              <>
+                <CameraView
+                  style={StyleSheet.absoluteFill}
+                  barcodeScannerSettings={{
+                    barcodeTypes: ['qr'],
+                  }}
+                  onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+                />
+
+                <View pointerEvents="none" style={styles.scannerOverlay}>
                   <View style={styles.scanTargetBox} />
                   <Text style={styles.guidanceText}>
                     Point camera at InFlow PC "Pair QR" window
                   </Text>
                 </View>
-              </CameraView>
+              </>
             )}
           </View>
 
@@ -147,7 +149,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   scannerOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',

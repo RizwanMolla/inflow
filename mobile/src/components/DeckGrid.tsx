@@ -4,12 +4,12 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Dimensions,
-  Animated,
+  LayoutChangeEvent,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { DeckSlot, GridDimension } from '../types/deck';
 import { renderDeckIcon, ACCENT_PALETTE } from '../utils/theme';
+import { useTheme } from '../utils/themeContext';
 
 interface DeckGridProps {
   slots: DeckSlot[];
@@ -24,55 +24,109 @@ export const DeckGrid: React.FC<DeckGridProps> = ({
   activeWorkspaceId,
   onPressSlot,
 }) => {
+  const [containerLayout, setContainerLayout] = useState<{ width: number; height: number } | null>(null);
+  const { theme } = useTheme();
+
+  // Determine grid dimensions
+  // e.g. 2x3 -> 2 rows, 3 cols (total 6)
+  // e.g. 3x4 -> 3 rows, 4 cols (total 12)
   const is2x3 = gridDimension === '2x3';
-  const totalCount = is2x3 ? 6 : 12;
-  const numColumns = is2x3 ? 3 : 4;
+  const numRows = is2x3 ? 2 : 3;
+  const numCols = is2x3 ? 3 : 4;
+  const totalCount = numRows * numCols;
   const activeSlots = slots.slice(0, totalCount);
 
-  return (
-    <View style={styles.container}>
-      <View style={[styles.grid, { flexWrap: 'wrap', flexDirection: 'row' }]}>
-        {activeSlots.map((slot, index) => {
-          const isSlotActive =
-            slot.type === 'workspace' &&
-            slot.targetId &&
-            activeWorkspaceId === slot.targetId;
+  // If slots has fewer items than total, fill with empty slots
+  const displaySlots: DeckSlot[] = [...activeSlots];
+  while (displaySlots.length < totalCount) {
+    displaySlots.push({
+      id: `slot-filler-${displaySlots.length}`,
+      type: 'empty',
+      label: 'Empty Slot',
+      icon: 'Plus',
+    });
+  }
 
-          return (
-            <DeckButton
-              key={slot.id || index}
-              slot={slot}
-              numColumns={numColumns}
-              isActive={!!isSlotActive}
-              onPress={() => onPressSlot(slot)}
-            />
-          );
-        })}
-      </View>
+  const handleLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    if (width > 0 && height > 0) {
+      setContainerLayout({ width, height });
+    }
+  };
+
+  // Compute maximum button size that fits strictly within container without scrolling
+  let buttonWidth = 80;
+  let buttonHeight = 80;
+  const GAP = 10;
+
+  if (containerLayout) {
+    const availableWidth = containerLayout.width - (GAP * (numCols - 1)) - 8;
+    const availableHeight = containerLayout.height - (GAP * (numRows - 1)) - 8;
+
+    const calculatedWidth = Math.floor(availableWidth / numCols);
+    const calculatedHeight = Math.floor(availableHeight / numRows);
+
+    // Keep square aspect ratio or slight rectangular fit
+    const optimalSize = Math.min(calculatedWidth, calculatedHeight);
+    buttonWidth = Math.max(optimalSize, 50);
+    buttonHeight = Math.max(optimalSize, 50);
+  }
+
+  // Partition into rows
+  const rows: DeckSlot[][] = [];
+  for (let r = 0; r < numRows; r++) {
+    rows.push(displaySlots.slice(r * numCols, (r + 1) * numCols));
+  }
+
+  return (
+    <View style={styles.container} onLayout={handleLayout}>
+      {rows.map((rowSlots, rowIndex) => (
+        <View key={`row-${rowIndex}`} style={[styles.row, { gap: GAP }]}>
+          {rowSlots.map((slot, colIndex) => {
+            const isSlotActive =
+              slot.type === 'workspace' &&
+              slot.targetId &&
+              activeWorkspaceId === slot.targetId;
+
+            return (
+              <DeckButton
+                key={slot.id || `cell-${rowIndex}-${colIndex}`}
+                slot={slot}
+                width={buttonWidth}
+                height={buttonHeight}
+                isActive={!!isSlotActive}
+                onPress={() => onPressSlot(slot)}
+              />
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 };
 
 interface DeckButtonProps {
   slot: DeckSlot;
-  numColumns: number;
+  width: number;
+  height: number;
   isActive: boolean;
   onPress: () => void;
 }
 
 const DeckButton: React.FC<DeckButtonProps> = ({
   slot,
-  numColumns,
+  width,
+  height,
   isActive,
   onPress,
 }) => {
   const [pressed, setPressed] = useState(false);
+  const { theme } = useTheme();
   const isEmpty = slot.type === 'empty';
   const palette = slot.accentColor ? ACCENT_PALETTE[slot.accentColor] : ACCENT_PALETTE.indigo;
 
   const handlePressIn = () => {
     setPressed(true);
-    // Tactile mechanical physical feedback
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
   };
 
@@ -89,7 +143,7 @@ const DeckButton: React.FC<DeckButtonProps> = ({
     }
     const now = Date.now();
     if (now - lastPressRef.current < 800) {
-      return; // Debounce rapid multi-touch triggers
+      return;
     }
     lastPressRef.current = now;
 
@@ -97,7 +151,9 @@ const DeckButton: React.FC<DeckButtonProps> = ({
     onPress();
   };
 
-  const itemWidthPercent = numColumns === 3 ? '31.3%' : '23.5%';
+  // Determine icon & font scale based on button height
+  const iconSize = height < 80 ? 18 : height < 110 ? 24 : 28;
+  const fontSize = height < 80 ? 9.5 : height < 110 ? 11 : 12.5;
 
   return (
     <TouchableOpacity
@@ -107,12 +163,25 @@ const DeckButton: React.FC<DeckButtonProps> = ({
       onPress={handlePress}
       style={[
         styles.buttonWrapper,
-        { width: itemWidthPercent as any },
-        isEmpty && styles.emptyButton,
-        !isEmpty && {
-          backgroundColor: isActive ? 'rgba(239, 68, 68, 0.2)' : palette.bg,
-          borderColor: isActive ? '#ef4444' : pressed ? palette.glow : palette.border,
+        {
+          width,
+          height,
+          backgroundColor: isEmpty
+            ? theme.deckButtonEmptyBg
+            : isActive
+            ? 'rgba(239, 68, 68, 0.25)'
+            : theme.mode === 'white'
+            ? '#ffffff'
+            : palette.bg,
+          borderColor: isActive
+            ? '#ef4444'
+            : isEmpty
+            ? theme.deckButtonEmptyBorder
+            : pressed
+            ? palette.glow
+            : palette.border,
         },
+        isEmpty && styles.emptyButton,
         pressed && styles.buttonPressed,
         isActive && styles.activeGlow,
       ]}
@@ -133,15 +202,21 @@ const DeckButton: React.FC<DeckButtonProps> = ({
         style={[
           styles.iconContainer,
           !isEmpty && {
-            backgroundColor: 'rgba(255, 255, 255, 0.08)',
-            borderColor: 'rgba(255, 255, 255, 0.12)',
+            backgroundColor: theme.mode === 'white' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
+            borderColor: theme.mode === 'white' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.12)',
           },
         ]}
       >
         {renderDeckIcon(
           slot.icon || (isEmpty ? 'Plus' : 'Zap'),
-          numColumns === 3 ? 24 : 18,
-          isEmpty ? '#52525b' : isActive ? '#f87171' : palette.text
+          iconSize,
+          isEmpty
+            ? theme.textSecondary
+            : isActive
+            ? '#ef4444'
+            : theme.mode === 'white'
+            ? '#09090b'
+            : palette.text
         )}
       </View>
 
@@ -151,16 +226,30 @@ const DeckButton: React.FC<DeckButtonProps> = ({
         ellipsizeMode="tail"
         style={[
           styles.label,
-          { color: isEmpty ? '#71717a' : '#fafafa' },
-          numColumns === 4 && { fontSize: 10 },
+          {
+            color: isEmpty
+              ? theme.textSecondary
+              : theme.mode === 'white'
+              ? '#18181b'
+              : '#fafafa',
+            fontSize,
+          },
         ]}
       >
         {slot.label || (isEmpty ? 'Empty' : 'Button')}
       </Text>
 
       {/* Category Badge */}
-      {!isEmpty && (
-        <Text style={[styles.badge, { color: palette.text }]}>
+      {!isEmpty && height >= 75 && (
+        <Text
+          style={[
+            styles.badge,
+            {
+              color: theme.mode === 'white' ? '#52525b' : palette.text,
+              backgroundColor: theme.badgeBg,
+            },
+          ]}
+        >
           {slot.type === 'workspace' ? 'WORKFLOW' : 'ACTION'}
         </Text>
       )}
@@ -170,35 +259,34 @@ const DeckButton: React.FC<DeckButtonProps> = ({
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     width: '100%',
-    paddingHorizontal: 8,
-    paddingVertical: 12,
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: 4,
   },
-  grid: {
-    width: '100%',
-    justifyContent: 'space-between',
-    gap: 8,
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 4,
   },
   buttonWrapper: {
-    aspectRatio: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1.5,
-    padding: 8,
+    padding: 6,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 3,
   },
   emptyButton: {
-    backgroundColor: 'rgba(20, 20, 24, 0.5)',
-    borderColor: 'rgba(255, 255, 255, 0.08)',
     borderStyle: 'dashed',
   },
   buttonPressed: {
@@ -216,23 +304,22 @@ const styles = StyleSheet.create({
   accentBar: {
     position: 'absolute',
     top: 0,
-    left: 14,
-    right: 14,
+    left: 12,
+    right: 12,
     height: 2.5,
     borderBottomLeftRadius: 3,
     borderBottomRightRadius: 3,
   },
   iconContainer: {
-    padding: 8,
-    borderRadius: 12,
+    padding: 6,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: 'transparent',
-    marginBottom: 4,
+    marginBottom: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   label: {
-    fontSize: 11,
     fontWeight: '600',
     textAlign: 'center',
     letterSpacing: -0.2,
@@ -241,7 +328,10 @@ const styles = StyleSheet.create({
     fontSize: 7.5,
     fontWeight: '700',
     letterSpacing: 0.5,
-    opacity: 0.75,
     marginTop: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    overflow: 'hidden',
   },
 });

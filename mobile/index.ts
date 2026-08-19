@@ -1,5 +1,5 @@
 import { Buffer } from 'buffer';
-global.Buffer = global.Buffer || Buffer;
+(globalThis as any).Buffer = (globalThis as any).Buffer || Buffer;
 
 import { LogBox } from 'react-native';
 

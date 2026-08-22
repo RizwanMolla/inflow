@@ -27,12 +27,10 @@ export const DeckGrid: React.FC<DeckGridProps> = ({
   const [containerLayout, setContainerLayout] = useState<{ width: number; height: number } | null>(null);
   const { theme } = useTheme();
 
-  // Determine grid dimensions
-  // e.g. 2x3 -> 2 rows, 3 cols (total 6)
-  // e.g. 3x4 -> 3 rows, 4 cols (total 12)
-  const is2x3 = gridDimension === '2x3';
-  const numRows = is2x3 ? 2 : 3;
-  const numCols = is2x3 ? 3 : 4;
+  // Parse dynamic grid dimensions (e.g., '2x3', '2x4', '3x4', '3x5', '3x6')
+  const [rowsCountStr, colsCountStr] = (gridDimension || '2x3').split('x');
+  const numRows = Math.max(1, parseInt(rowsCountStr, 10) || 2);
+  const numCols = Math.max(1, parseInt(colsCountStr, 10) || 3);
   const totalCount = numRows * numCols;
   const activeSlots = slots.slice(0, totalCount);
 

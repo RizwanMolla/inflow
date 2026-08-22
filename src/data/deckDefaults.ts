@@ -1,7 +1,7 @@
 import type { DeckConfig, GridDimension, Workspace } from '../types/workspace';
 
 export function generateDefaultDeckConfig(workspaces: Workspace[]): DeckConfig {
-  const wsSlots = Array.from({ length: 6 }).map((_, i) => {
+  const wsSlots = Array.from({ length: 18 }).map((_, i) => {
     const ws = workspaces[i];
     if (ws) {
       return {
@@ -26,7 +26,7 @@ export function generateDefaultDeckConfig(workspaces: Workspace[]): DeckConfig {
     w.actions.map((a) => ({ ...a, workspaceId: w.id, workspaceName: w.name }))
   );
 
-  const actionSlots = Array.from({ length: 6 }).map((_, i) => {
+  const actionSlots = Array.from({ length: 18 }).map((_, i) => {
     const action = allActions[i];
     if (action) {
       return {

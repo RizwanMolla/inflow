@@ -1,41 +1,46 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus,
-  Search,
   Download,
   Upload,
-  Layers,
   Zap,
   CheckCircle2,
   Sparkles,
   HelpCircle,
-  Smartphone,
   QrCode,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import type { Workspace, LaunchReport, DeckConfig } from './types/workspace';
+import type {
+  Workspace,
+  WorkspaceAction,
+  LaunchReport,
+  DeckConfig,
+  DeckSlot,
+  GridDimension,
+} from './types/workspace';
 import { StorageService, isTauriEnvironment } from './services/storage';
 import { LauncherService } from './services/launcher';
-import { WorkspaceCard } from './components/WorkspaceCard';
 import { WorkspaceModal } from './components/WorkspaceModal';
 import { LaunchOverlay } from './components/LaunchOverlay';
 import { OnboardingModal } from './components/OnboardingModal';
 import { TemplateModal } from './components/TemplateModal';
 import { QRPairingModal } from './components/QRPairingModal';
-import { MobileDeckModal } from './components/MobileDeckModal';
+import { DeckCanvas, getDimensionSlotCount } from './components/DeckCanvas';
+import { KeyInspector } from './components/KeyInspector';
+import { ActionPalette } from './components/ActionPalette';
 import { generateDefaultDeckConfig } from './data/deckDefaults';
 
 export function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [deckConfig, setDeckConfig] = useState<DeckConfig>(() => generateDefaultDeckConfig([]));
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeDeckTab, setActiveDeckTab] = useState<string>('workspaces');
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(0);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isQRPairingOpen, setIsQRPairingOpen] = useState(false);
-  const [isMobileDeckOpen, setIsMobileDeckOpen] = useState(false);
   const [editingWorkspace, setEditingWorkspace] = useState<Workspace | null>(null);
-  const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<LaunchReport | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const isTauri = isTauriEnvironment();
@@ -118,6 +123,228 @@ export function App() {
     await StorageService.saveDeckConfig(newConfig);
   };
 
+  const handleDimensionChange = (dim: GridDimension) => {
+    const { total } = getDimensionSlotCount(dim);
+    const updatedPages = deckConfig.pages.map((p) => {
+      let slots = [...p.slots];
+      if (slots.length < total) {
+        const diff = total - slots.length;
+        const extra = Array.from({ length: diff }).map((_, i) => ({
+          id: `slot-${p.id}-${slots.length + i}`,
+          type: 'empty' as const,
+          label: 'Empty Slot',
+          icon: 'Plus',
+        }));
+        slots = [...slots, ...extra];
+      }
+      return { ...p, slots };
+    });
+
+    const updated: DeckConfig = {
+      ...deckConfig,
+      gridDimension: dim,
+      pages: updatedPages,
+      updatedAt: new Date().toISOString(),
+    };
+    handleSaveDeckConfig(updated);
+  };
+
+  const handleAddPage = (title?: string) => {
+    const { total } = getDimensionSlotCount(deckConfig.gridDimension || '2x3');
+    const newPageId = `page-${Date.now()}`;
+    const pageNumber = deckConfig.pages.length + 1;
+    const pageTitle = title || `Deck ${pageNumber}`;
+
+    const newSlots = Array.from({ length: total }).map((_, i) => ({
+      id: `slot-${newPageId}-${i}`,
+      type: 'empty' as const,
+      label: 'Empty Slot',
+      icon: 'Plus',
+    }));
+
+    const newPage = {
+      id: newPageId,
+      title: pageTitle,
+      slots: newSlots,
+    };
+
+    const updatedConfig: DeckConfig = {
+      ...deckConfig,
+      pages: [...deckConfig.pages, newPage],
+      updatedAt: new Date().toISOString(),
+    };
+
+    handleSaveDeckConfig(updatedConfig);
+    setActiveDeckTab(newPageId);
+    setSelectedSlotIndex(0);
+    showToast(`Created new deck page "${pageTitle}"`);
+  };
+
+  const handleRenamePage = (pageId: string, newTitle: string) => {
+    const updatedPages = deckConfig.pages.map((p) =>
+      p.id === pageId ? { ...p, title: newTitle } : p
+    );
+    const updatedConfig: DeckConfig = {
+      ...deckConfig,
+      pages: updatedPages,
+      updatedAt: new Date().toISOString(),
+    };
+    handleSaveDeckConfig(updatedConfig);
+    showToast(`Renamed page to "${newTitle}"`);
+  };
+
+  const handleDeletePage = (pageId: string) => {
+    if (deckConfig.pages.length <= 1) {
+      showToast('Cannot delete the only remaining page');
+      return;
+    }
+
+    const updatedPages = deckConfig.pages.filter((p) => p.id !== pageId);
+    const fallbackTab = updatedPages[0].id;
+
+    const updatedConfig: DeckConfig = {
+      ...deckConfig,
+      pages: updatedPages,
+      updatedAt: new Date().toISOString(),
+    };
+
+    handleSaveDeckConfig(updatedConfig);
+    if (activeDeckTab === pageId) {
+      setActiveDeckTab(fallbackTab);
+      setSelectedSlotIndex(0);
+    }
+    showToast('Deleted deck page');
+  };
+
+  const handleResetDefaults = () => {
+    if (window.confirm('Reset deck layout back to smart defaults?')) {
+      const generated = generateDefaultDeckConfig(workspaces);
+      handleSaveDeckConfig(generated);
+      setActiveDeckTab('workspaces');
+      setSelectedSlotIndex(0);
+      showToast('Deck layout reset to defaults');
+    }
+  };
+
+  const handleUpdateSlot = (index: number, updatedSlot: Partial<DeckSlot>) => {
+    setDeckConfig((prev) => {
+      const updatedPages = prev.pages.map((p) => {
+        if (p.id === activeDeckTab) {
+          const slots = [...p.slots];
+          while (slots.length <= index) {
+            slots.push({
+              id: `slot-${p.id}-${slots.length}`,
+              type: 'empty',
+              label: 'Empty Slot',
+              icon: 'Plus',
+            });
+          }
+          slots[index] = {
+            ...slots[index],
+            ...updatedSlot,
+          };
+          return { ...p, slots };
+        }
+        return p;
+      });
+
+      const updatedConfig: DeckConfig = {
+        ...prev,
+        pages: updatedPages,
+        updatedAt: new Date().toISOString(),
+      };
+      StorageService.saveDeckConfig(updatedConfig);
+      return updatedConfig;
+    });
+  };
+
+  const handleAssignWorkspace = (index: number, ws: Workspace) => {
+    handleUpdateSlot(index, {
+      type: 'workspace',
+      targetId: ws.id,
+      targetWorkspaceId: undefined,
+      label: ws.name,
+      icon: ws.icon || 'Zap',
+      accentColor: ws.accentColor || 'indigo',
+    });
+    showToast(`Assigned workspace "${ws.name}" to Key #${index + 1}`);
+  };
+
+  const handleAssignAction = (
+    index: number,
+    action: { id: string; label: string; type: string; workspaceId: string }
+  ) => {
+    const defaultIcon =
+      action.type === 'url'
+        ? 'Globe'
+        : action.type === 'app'
+        ? 'Terminal'
+        : action.type === 'folder'
+        ? 'Folder'
+        : 'FileText';
+
+    handleUpdateSlot(index, {
+      type: 'quick_action',
+      targetId: action.id,
+      targetWorkspaceId: action.workspaceId,
+      label: action.label,
+      icon: defaultIcon,
+      accentColor: 'blue',
+    });
+    showToast(`Assigned action "${action.label}" to Key #${index + 1}`);
+  };
+
+  const handleClearSlot = (index: number) => {
+    handleUpdateSlot(index, {
+      type: 'empty',
+      targetId: undefined,
+      targetWorkspaceId: undefined,
+      label: 'Empty Slot',
+      icon: 'Plus',
+      accentColor: undefined,
+    });
+    showToast(`Cleared Key #${index + 1}`);
+  };
+
+  // Drag & drop or Palette assignment handler
+  const handleDropActionOrWorkspace = (
+    slotIndex: number,
+    data: { type: 'workspace' | 'action'; id: string; workspaceId?: string }
+  ) => {
+    const currentList = workspacesRef.current.length > 0 ? workspacesRef.current : workspaces;
+    if (data.type === 'workspace') {
+      const targetWs = currentList.find((w) => w.id === data.id);
+      if (targetWs) {
+        handleAssignWorkspace(slotIndex, targetWs);
+      }
+    } else if (data.type === 'action') {
+      const parentWs = currentList.find((w) => w.id === data.workspaceId);
+      const targetAct = parentWs?.actions.find((a) => a.id === data.id);
+      if (targetAct && data.workspaceId) {
+        handleAssignAction(slotIndex, {
+          ...targetAct,
+          workspaceId: data.workspaceId,
+        });
+      }
+    }
+  };
+
+  // Helper when user clicks from right palette to assign to currently selected slot
+  const handleAssignFromPaletteWorkspace = (ws: Workspace) => {
+    const targetIdx = selectedSlotIndex !== null ? selectedSlotIndex : 0;
+    handleAssignWorkspace(targetIdx, ws);
+    setSelectedSlotIndex(targetIdx);
+  };
+
+  const handleAssignFromPaletteAction = (action: WorkspaceAction, workspaceId: string) => {
+    const targetIdx = selectedSlotIndex !== null ? selectedSlotIndex : 0;
+    handleAssignAction(targetIdx, {
+      ...action,
+      workspaceId,
+    });
+    setSelectedSlotIndex(targetIdx);
+  };
+
   const handleSelectTemplate = async (template: Workspace) => {
     const newWs: Workspace = {
       ...template,
@@ -139,42 +366,7 @@ export function App() {
     showToast(`Added workspace from template "${template.name}"`);
   };
 
-  const handleDeleteWorkspace = async (id: string) => {
-    const target = workspacesRef.current.find((w) => w.id === id);
-    if (!target) return;
-    if (window.confirm(`Are you sure you want to delete "${target.name}"?`)) {
-      setWorkspaces((prev) => {
-        const updated = prev.filter((w) => w.id !== id);
-        StorageService.saveWorkspaces(updated);
-        return updated;
-      });
-      showToast(`Deleted "${target.name}"`);
-    }
-  };
-
-  const handleDuplicateWorkspace = async (workspace: Workspace) => {
-    const duplicated: Workspace = {
-      ...workspace,
-      id: `ws-${Date.now()}`,
-      name: `${workspace.name} (Copy)`,
-      launchCount: 0,
-      lastLaunchedAt: undefined,
-      actions: workspace.actions.map((a) => ({
-        ...a,
-        id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      })),
-    };
-    setWorkspaces((prev) => {
-      const updated = [duplicated, ...prev];
-      StorageService.saveWorkspaces(updated);
-      return updated;
-    });
-    showToast(`Duplicated "${workspace.name}"`);
-  };
-
   const handleLaunch = async (workspace: Workspace) => {
-    setLaunchingId(workspace.id);
-
     confetti({
       particleCount: 30,
       spread: 45,
@@ -207,7 +399,6 @@ export function App() {
     });
 
     setActiveReport(report);
-    setLaunchingId(null);
 
     setWorkspaces((prevWorkspaces) => {
       const updated = prevWorkspaces.map((w) =>
@@ -224,13 +415,22 @@ export function App() {
     });
   };
 
+  const handleTriggerActionOnly = async (actionId: string, workspaceId: string) => {
+    const parentWs = workspaces.find((w) => w.id === workspaceId);
+    const targetAct = parentWs?.actions.find((a) => a.id === actionId);
+    if (targetAct) {
+      await LauncherService.executeAction(targetAct);
+      showToast(`Action executed: ${targetAct.label}`);
+    }
+  };
+
   const handleExport = () => {
     const jsonStr = StorageService.exportToJson(workspaces, deckConfig);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `inflow-workspaces-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `inflow-config-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('Exported workspaces & deck configuration');
@@ -264,64 +464,76 @@ export function App() {
     setIsOnboardingOpen(false);
   };
 
-  const filteredWorkspaces = workspaces.filter(
-    (w) =>
-      w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      w.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      w.actions.some(
-        (a) =>
-          a.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          a.target.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-  );
+  const activePage =
+    deckConfig.pages.find((p) => p.id === activeDeckTab) || deckConfig.pages[0];
 
-  const totalActionsCount = workspaces.reduce((acc, w) => acc + w.actions.length, 0);
+  const currentSelectedSlot =
+    selectedSlotIndex !== null && activePage?.slots[selectedSlotIndex]
+      ? activePage.slots[selectedSlotIndex]
+      : selectedSlotIndex !== null
+      ? {
+          id: `slot-${activeDeckTab}-${selectedSlotIndex}`,
+          type: 'empty' as const,
+          label: 'Empty Slot',
+          icon: 'Plus',
+        }
+      : null;
+
+  // Resizable Right Pane State (in pixels, clamped between 260px and 450px)
+  const [rightPanelWidth, setRightPanelWidth] = useState<number>(340);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const handleMouseDownResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+
+    const startX = e.clientX;
+    const startWidth = rightPanelWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = startX - moveEvent.clientX; // dragging left expands width
+      const newWidth = Math.min(Math.max(startWidth + delta, 260), 460);
+      setRightPanelWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
 
   return (
-    <div className="min-h-screen bg-[#121214] text-neutral-200 flex flex-col font-sans antialiased selection:bg-red-500/30 selection:text-white">
+    <div className={`h-screen w-screen bg-[#121214] text-neutral-200 flex flex-col font-sans antialiased selection:bg-red-500/30 selection:text-white overflow-hidden ${isResizing ? 'cursor-col-resize select-none' : ''}`}>
       {/* Raycast Ambient Vignette Background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[700px] h-[300px] bg-red-500/[0.03] rounded-full blur-[120px]" />
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[800px] h-[350px] bg-red-500/[0.04] rounded-full blur-[130px]" />
       </div>
 
-      {/* Raycast Translucent Navigation Topbar */}
-      <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-[#1e1e20]/80 backdrop-blur-2xl px-4 py-2.5">
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4">
+      {/* Topbar Header */}
+      <header className="flex-shrink-0 z-40 border-b border-white/[0.08] bg-[#1a1a1c]/90 backdrop-blur-2xl px-5 py-2.5">
+        <div className="flex items-center justify-between gap-4">
           {/* App Branding */}
-          <div className="flex items-center space-x-2.5">
-            <div className="w-6 h-6 rounded-md bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 shadow-sm">
-              <Zap className="w-3.5 h-3.5" />
+          <div className="flex items-center space-x-3">
+            <div className="w-7 h-7 rounded-lg bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 shadow-sm">
+              <Zap className="w-4 h-4" />
             </div>
             <div className="flex items-center space-x-2">
-              <h1 className="text-xs font-semibold tracking-tight text-white">InFlow</h1>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-neutral-400 border border-white/10">
+              <h1 className="text-sm font-semibold tracking-tight text-white">InFlow</h1>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-neutral-400 border border-white/10">
                 {isTauri ? 'Windows Desktop' : 'Web Simulator'}
               </span>
             </div>
           </div>
 
           {/* Action Toolbar */}
-          <div className="flex items-center space-x-1.5">
-            {/* Search Input with Shortcut Cue */}
-            <div className="relative flex items-center">
-              <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search command or workspace..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-8 h-7 bg-neutral-900/80 border border-white/10 rounded-md text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-500/50 focus:ring-1 focus:ring-red-500/50 w-40 sm:w-60 transition-all"
-                aria-label="Search workflows"
-              />
-              <kbd className="hidden sm:inline-block absolute right-2 text-[9px] font-mono text-neutral-400 border border-white/10 px-1 rounded bg-white/5">
-                /
-              </kbd>
-            </div>
-
-            <div className="h-4 w-[1px] bg-white/10 mx-1" />
-
-            {/* Icon Utility Buttons */}
+          <div className="flex items-center space-x-2">
+            {/* Guide */}
             <button
+              type="button"
               onClick={() => setIsOnboardingOpen(true)}
               title="User Guide"
               className="w-7 h-7 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white transition-colors"
@@ -329,26 +541,20 @@ export function App() {
               <HelpCircle className="w-3.5 h-3.5" />
             </button>
 
+            {/* Templates */}
             <button
+              type="button"
               onClick={() => setIsTemplateModalOpen(true)}
-              title="Browse Templates"
+              title="Browse Workflow Templates"
               className="h-7 px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition-colors"
             >
               <Sparkles className="w-3 h-3 text-red-400" />
               <span className="hidden sm:inline text-[11px]">Templates</span>
             </button>
 
-            {/* Mobile Deck & Pairing Actions */}
+            {/* Pair Phone via QR */}
             <button
-              onClick={() => setIsMobileDeckOpen(true)}
-              title="Configure Mobile Deck"
-              className="h-7 px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition-colors"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="hidden md:inline text-[11px]">Mobile Deck</span>
-            </button>
-
-            <button
+              type="button"
               onClick={() => setIsQRPairingOpen(true)}
               title="Pair Phone via QR Code"
               className="h-7 px-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white text-xs font-medium flex items-center space-x-1.5 transition-colors"
@@ -357,29 +563,34 @@ export function App() {
               <span className="hidden md:inline text-[11px]">Pair QR</span>
             </button>
 
+            <div className="h-4 w-[1px] bg-white/10 mx-1" />
+
+            {/* Import / Export */}
             <label
               className="w-7 h-7 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white cursor-pointer transition-colors"
-              title="Import Config"
+              title="Import Config JSON"
             >
               <Upload className="w-3.5 h-3.5" />
               <input type="file" accept=".json" onChange={handleImport} className="hidden" />
             </label>
 
             <button
+              type="button"
               onClick={handleExport}
-              title="Export Config"
+              title="Export Config JSON"
               className="w-7 h-7 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-neutral-300 hover:text-white transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
             </button>
 
-            {/* Primary Action Button */}
+            {/* Primary New Workspace Button */}
             <button
+              type="button"
               onClick={() => {
                 setEditingWorkspace(null);
                 setIsModalOpen(true);
               }}
-              className="h-7 px-2.5 bg-red-500 hover:bg-red-600 text-white rounded-md text-xs font-medium shadow-sm flex items-center space-x-1 transition-all active:scale-[0.98]"
+              className="h-7 px-3 bg-red-500 hover:bg-red-600 text-white rounded-md text-xs font-medium shadow-sm flex items-center space-x-1.5 transition-all active:scale-[0.98]"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New</span>
@@ -388,89 +599,81 @@ export function App() {
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-5 z-10">
-        {/* Compact HUD Stats Ribbon */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
-          <div className="p-2.5 bg-[#1e1e20]/50 border border-white/[0.06] rounded-lg shadow-sm backdrop-blur-md">
-            <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Workspaces</span>
-            <div className="text-sm font-medium text-white mt-0.5">{workspaces.length}</div>
+      {/* Main Studio 3-Pane Workspace */}
+      <main className="flex-1 min-h-0 z-10 p-3 flex gap-2 overflow-hidden">
+        {/* Left Column (Deck Canvas + Key Customization Inspector) */}
+        <div className="flex-1 min-w-0 flex flex-col gap-2.5 h-full overflow-hidden">
+          {/* Top-Left: Visual Deck Canvas */}
+          <div className="flex-[3] min-h-0 overflow-hidden">
+            <DeckCanvas
+              deckConfig={deckConfig}
+              activeTab={activeDeckTab}
+              onTabChange={(tab) => {
+                setActiveDeckTab(tab);
+                setSelectedSlotIndex(0);
+              }}
+              onAddPage={handleAddPage}
+              onRenamePage={handleRenamePage}
+              onDeletePage={handleDeletePage}
+              selectedSlotIndex={selectedSlotIndex}
+              onSelectSlot={(idx) => setSelectedSlotIndex(idx)}
+              onUpdateDimension={handleDimensionChange}
+              onResetDefaults={handleResetDefaults}
+              onDropActionOrWorkspace={handleDropActionOrWorkspace}
+            />
           </div>
-          <div className="p-2.5 bg-[#1e1e20]/50 border border-white/[0.06] rounded-lg shadow-sm backdrop-blur-md">
-            <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Actions</span>
-            <div className="text-sm font-medium text-white mt-0.5">{totalActionsCount}</div>
-          </div>
-          <div className="p-2.5 bg-[#1e1e20]/50 border border-white/[0.06] rounded-lg shadow-sm backdrop-blur-md">
-            <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Launches</span>
-            <div className="text-sm font-medium text-white mt-0.5">
-              {workspaces.reduce((acc, w) => acc + (w.launchCount || 0), 0)}
-            </div>
-          </div>
-          <div className="p-2.5 bg-[#1e1e20]/50 border border-white/[0.06] rounded-lg shadow-sm backdrop-blur-md">
-            <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Runtime</span>
-            <div className="text-xs font-medium text-neutral-300 mt-1 flex items-center space-x-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span>{isTauri ? 'Windows App' : 'Web Sandbox'}</span>
-            </div>
+
+          {/* Bottom-Left: Key Inspector & Styling Studio */}
+          <div className="flex-[2] min-h-0 overflow-hidden">
+            <KeyInspector
+              selectedSlotIndex={selectedSlotIndex}
+              slot={currentSelectedSlot}
+              activeTab={activeDeckTab}
+              workspaces={workspaces}
+              onUpdateSlot={handleUpdateSlot}
+              onClearSlot={handleClearSlot}
+              onAssignWorkspace={handleAssignWorkspace}
+              onAssignAction={handleAssignAction}
+              onTriggerLaunch={handleLaunch}
+              onTriggerAction={handleTriggerActionOnly}
+            />
           </div>
         </div>
 
-        {/* Workspaces Grid / Raycast Empty View */}
-        {filteredWorkspaces.length === 0 ? (
-          <div className="text-center py-14 px-4 border border-white/[0.08] rounded-xl bg-[#1e1e20]/40 backdrop-blur-xl max-w-sm mx-auto shadow-2xl">
-            <div className="w-9 h-9 rounded-md bg-white/5 border border-white/10 mx-auto flex items-center justify-center text-neutral-400 mb-2.5">
-              <Layers className="w-4 h-4" />
-            </div>
-            <h3 className="text-xs font-semibold text-white tracking-tight">
-              {searchQuery ? 'No Results Found' : 'No Workspaces Configured'}
-            </h3>
-            <p className="text-[11px] text-neutral-400 max-w-xs mx-auto mt-1 mb-4 leading-normal">
-              {searchQuery
-                ? `No workflows matching "${searchQuery}".`
-                : 'Create automated workflows to launch apps, local directories, and websites.'}
-            </p>
-            <div className="flex items-center justify-center gap-2">
-              <button
-                onClick={() => {
-                  setEditingWorkspace(null);
-                  setIsModalOpen(true);
-                }}
-                className="h-7 px-3 bg-red-500 hover:bg-red-600 text-white rounded-md text-xs font-medium flex items-center space-x-1 transition-all"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Create Workspace</span>
-              </button>
-              <button
-                onClick={() => setIsTemplateModalOpen(true)}
-                className="h-7 px-3 bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10 rounded-md text-xs font-medium transition-colors"
-              >
-                Templates
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {filteredWorkspaces.map((workspace) => (
-              <WorkspaceCard
-                key={workspace.id}
-                workspace={workspace}
-                onLaunch={handleLaunch}
-                onEdit={(ws) => {
-                  setEditingWorkspace(ws);
-                  setIsModalOpen(true);
-                }}
-                onDuplicate={handleDuplicateWorkspace}
-                onDelete={handleDeleteWorkspace}
-                isLaunching={launchingId === workspace.id}
-              />
-            ))}
-          </div>
-        )}
+        {/* Resizable Divider Handle */}
+        <div
+          onMouseDown={handleMouseDownResize}
+          className="group relative w-2 hover:w-2 flex items-center justify-center cursor-col-resize select-none flex-shrink-0 transition-colors"
+          title="Drag to resize library pane"
+        >
+          <div className="w-[3px] h-12 rounded-full bg-white/10 group-hover:bg-red-500/80 group-active:bg-red-500 transition-colors" />
+        </div>
+
+        {/* Right Column: Action Library & Workspace Palette (Dynamic width) */}
+        <div
+          style={{ width: `${rightPanelWidth}px` }}
+          className="flex-shrink-0 h-full min-h-0 overflow-hidden"
+        >
+          <ActionPalette
+            workspaces={workspaces}
+            onSelectWorkspaceToAssign={handleAssignFromPaletteWorkspace}
+            onSelectActionToAssign={handleAssignFromPaletteAction}
+            onOpenNewWorkspaceModal={() => {
+              setEditingWorkspace(null);
+              setIsModalOpen(true);
+            }}
+            onEditWorkspace={(ws) => {
+              setEditingWorkspace(ws);
+              setIsModalOpen(true);
+            }}
+            onLaunchWorkspace={handleLaunch}
+          />
+        </div>
       </main>
 
-      {/* Raycast Floating HUD Toast */}
+      {/* Floating HUD Toast */}
       {toastMessage && (
-        <div className="fixed bottom-4 right-4 z-50 px-3 py-1.5 bg-[#1e1e20]/90 text-white border border-white/10 rounded-md shadow-2xl text-xs font-medium flex items-center space-x-2 animate-fade-in backdrop-blur-2xl">
+        <div className="fixed bottom-4 right-4 z-50 px-3.5 py-2 bg-[#1e1e20]/95 text-white border border-white/10 rounded-lg shadow-2xl text-xs font-medium flex items-center space-x-2 animate-fade-in backdrop-blur-2xl">
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
           <span>{toastMessage}</span>
         </div>
@@ -505,16 +708,6 @@ export function App() {
       <QRPairingModal
         isOpen={isQRPairingOpen}
         onClose={() => setIsQRPairingOpen(false)}
-      />
-
-      {/* Mobile Deck Visual Configurator */}
-      <MobileDeckModal
-        isOpen={isMobileDeckOpen}
-        onClose={() => setIsMobileDeckOpen(false)}
-        workspaces={workspaces}
-        deckConfig={deckConfig}
-        onSaveDeckConfig={handleSaveDeckConfig}
-        onTriggerLaunch={handleLaunch}
       />
     </div>
   );

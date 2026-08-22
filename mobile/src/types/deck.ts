@@ -1,6 +1,6 @@
 export type ActionType = 'url' | 'folder' | 'file' | 'app';
 export type AccentColor = 'blue' | 'indigo' | 'emerald' | 'violet' | 'amber' | 'rose' | 'cyan';
-export type GridDimension = '2x3' | '3x4';
+export type GridDimension = '2x3' | '2x4' | '3x4' | '3x5' | '3x6';
 export type DeckItemType = 'workspace' | 'quick_action' | 'empty';
 
 export interface DeckSlot {

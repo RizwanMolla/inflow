@@ -45,7 +45,7 @@ export interface LaunchReport {
 }
 
 // --- Mobile Deck Configuration Types ---
-export type GridDimension = '2x3' | '3x4'; // 2 rows x 3 cols (6 slots) or 3 rows x 4 cols (12 slots)
+export type GridDimension = '2x3' | '2x4' | '3x4' | '3x5' | '3x6'; // Supported stream deck grid matrix shapes
 export type DeckItemType = 'workspace' | 'quick_action' | 'empty';
 
 export interface DeckSlot {

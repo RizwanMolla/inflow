@@ -1,82 +1,67 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
-  StyleSheet,
-  View,
-  Text,
   Dimensions,
   FlatList,
-  TouchableOpacity,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
+  Pressable,
+  StyleSheet,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
-import {
-  Wifi,
-  QrCode,
-  Layers,
-  Sparkles,
-  Monitor,
-  Zap,
-  ChevronRight,
-} from 'lucide-react-native';
+import { FolderOpen, Palette, QrCode, Zap } from 'lucide-react-native';
+import { AppText, Button } from '../ui/primitives';
+import { colors, withAlpha } from '../ui/tokens';
+import { Haptics } from '../services/haptics';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 32;
+const CARD_GAP = 12;
 
 interface SlideItem {
   id: string;
+  eyebrow: string;
   title: string;
-  subtitle: string;
   description: string;
   icon: React.ComponentType<{ size?: number; color?: string }>;
   accent: string;
-  badge: string;
-  step: string;
 }
 
 const GUIDE_SLIDES: SlideItem[] = [
   {
-    id: 'step-1',
-    step: 'STEP 1',
-    badge: 'PAIRING',
-    title: 'Connect to Desktop',
-    subtitle: 'Ensure PC & phone are on the same Wi-Fi',
+    id: 'pair',
+    eyebrow: 'Step 1 · Pair',
+    title: 'Connect to your PC',
     description:
-      'Open InFlow on your PC, click "Mobile Companion" in the header or tray, and click "Scan QR Code" above to pair instantly.',
+      'Put the phone and PC on the same Wi-Fi. In InFlow on your PC, click “Pair phone”, then scan the code. The pairing code keeps other devices out.',
     icon: QrCode,
     accent: '#ef4444',
   },
   {
-    id: 'step-2',
-    step: 'STEP 2',
-    badge: 'CONTROL',
-    title: 'Zero-Latency Stream Deck',
-    subtitle: 'Tactile physical deck in your palm',
+    id: 'deck',
+    eyebrow: 'Step 2 · Press',
+    title: 'Your Stream Deck',
     description:
-      'Tap "Open Deck" to launch the landscape console. Custom macro buttons, workspaces, and quick actions trigger instantly on your PC.',
+      'Open the deck for a landscape grid of keys. Workspaces, hotkeys, media keys and commands run on your PC, and each key flashes green or red with the result.',
     icon: Zap,
-    accent: '#8b5cf6',
+    accent: '#818cf8',
   },
   {
-    id: 'step-3',
-    step: 'STEP 3',
-    badge: 'WORKFLOWS',
-    title: 'Smart Workspace Switching',
-    subtitle: 'Syncs active projects automatically',
+    id: 'folders',
+    eyebrow: 'Step 3 · Organise',
+    title: 'Workspaces & folders',
     description:
-      'Switching workspaces on your PC automatically highlights the active layout and triggers corresponding app suites and terminal layouts.',
-    icon: Layers,
-    accent: '#10b981',
+      'A workspace key opens every app, folder and site you need in order. Folder keys open nested pages; the first key inside a folder takes you back.',
+    icon: FolderOpen,
+    accent: '#34d399',
   },
   {
-    id: 'step-4',
-    step: 'STEP 4',
-    badge: 'CUSTOMIZE',
-    title: 'Personalize Themes & Grids',
-    subtitle: 'Black, Gray, and White studio styles',
+    id: 'tune',
+    eyebrow: 'Step 4 · Tune',
+    title: 'Make it yours',
     description:
-      'Inside the deck, tap the 3-line menu on the top right to switch themes or toggle desk-dock keep-awake mode for your phone stand.',
-    icon: Sparkles,
-    accent: '#f59e0b',
+      'Inside the deck, tap the menu button to switch between Studio, Graphite and Daylight themes, or change how strong the haptic clicks feel.',
+    icon: Palette,
+    accent: '#fbbf24',
   },
 ];
 
@@ -86,94 +71,81 @@ interface GuideCarouselProps {
 
 export const GuideCarousel: React.FC<GuideCarouselProps> = ({ onScanPress }) => {
   const [activeIndex, setActiveIndex] = useState(0);
-  const flatListRef = useRef<FlatList>(null);
+  const listRef = useRef<FlatList<SlideItem>>(null);
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const scrollOffset = event.nativeEvent.contentOffset.x;
-    const index = Math.round(scrollOffset / (CARD_WIDTH + 12));
+    const index = Math.round(event.nativeEvent.contentOffset.x / (CARD_WIDTH + CARD_GAP));
     if (index >= 0 && index < GUIDE_SLIDES.length && index !== activeIndex) {
       setActiveIndex(index);
+      Haptics.tick();
     }
   };
 
-  const handleDotPress = (index: number) => {
-    flatListRef.current?.scrollToIndex({ index, animated: true });
+  const goTo = (index: number) => {
+    listRef.current?.scrollToIndex({ index, animated: true });
     setActiveIndex(index);
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <View style={styles.titleWithBadge}>
-          <Text style={styles.sectionHeader}>GETTING STARTED GUIDE</Text>
-        </View>
-        <Text style={styles.stepIndicator}>
-          {activeIndex + 1} of {GUIDE_SLIDES.length}
-        </Text>
+        <AppText variant="eyebrow">Getting started</AppText>
+        <AppText variant="micro" color={colors.ink3} style={styles.counter}>
+          {activeIndex + 1} / {GUIDE_SLIDES.length}
+        </AppText>
       </View>
 
-      {/* Carousel list */}
       <FlatList
-        ref={flatListRef}
+        ref={listRef}
         data={GUIDE_SLIDES}
         keyExtractor={(item) => item.id}
         horizontal
-        pagingEnabled={false}
-        snapToInterval={CARD_WIDTH + 12}
+        snapToInterval={CARD_WIDTH + CARD_GAP}
         decelerationRate="fast"
         showsHorizontalScrollIndicator={false}
         onScroll={handleScroll}
-        scrollEventThrottle={16}
+        scrollEventThrottle={32}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => {
-          const IconComp = item.icon;
+          const Icon = item.icon;
           return (
             <View style={[styles.card, { width: CARD_WIDTH }]}>
-              {/* Top Row: Step Tag + Badge */}
-              <View style={styles.cardTopRow}>
-                <View style={[styles.stepTag, { backgroundColor: `${item.accent}20`, borderColor: `${item.accent}40` }]}>
-                  <Text style={[styles.stepTagText, { color: item.accent }]}>{item.step}</Text>
+              <View style={styles.cardHead}>
+                <View
+                  style={[
+                    styles.iconTile,
+                    { backgroundColor: withAlpha(item.accent, 0.14), borderColor: withAlpha(item.accent, 0.28) },
+                  ]}
+                >
+                  <Icon size={18} color={item.accent} />
                 </View>
-                <View style={styles.badgePill}>
-                  <Text style={styles.badgePillText}>{item.badge}</Text>
-                </View>
-              </View>
-
-              {/* Main Info */}
-              <View style={styles.cardContentRow}>
-                <View style={[styles.iconWrapper, { backgroundColor: `${item.accent}15`, borderColor: `${item.accent}30` }]}>
-                  <IconComp size={24} color={item.accent} />
-                </View>
-                <View style={styles.cardTextCol}>
-                  <Text style={styles.cardTitle}>{item.title}</Text>
-                  <Text style={styles.cardSubtitle}>{item.subtitle}</Text>
+                <View style={styles.cardTitles}>
+                  <AppText variant="eyebrow" color={item.accent}>
+                    {item.eyebrow}
+                  </AppText>
+                  <AppText variant="base">{item.title}</AppText>
                 </View>
               </View>
-
-              <Text style={styles.cardDescription}>{item.description}</Text>
-
-              {item.id === 'step-1' && (
-                <TouchableOpacity onPress={onScanPress} style={styles.cardActionBtn} activeOpacity={0.8}>
-                  <QrCode size={14} color="#ffffff" />
-                  <Text style={styles.cardActionBtnText}>Scan Pairing QR Code</Text>
-                  <ChevronRight size={14} color="#ffffff" />
-                </TouchableOpacity>
+              <AppText variant="ui" color={colors.ink2}>
+                {item.description}
+              </AppText>
+              {item.id === 'pair' && (
+                <Button label="Scan pairing code" icon={QrCode} variant="primary" size="sm" onPress={onScanPress} style={styles.cardAction} />
               )}
             </View>
           );
         }}
       />
 
-      {/* Pagination Dots */}
-      <View style={styles.paginationRow}>
-        {GUIDE_SLIDES.map((_, i) => (
-          <TouchableOpacity
-            key={`dot-${i}`}
-            onPress={() => handleDotPress(i)}
-            style={[
-              styles.dot,
-              activeIndex === i ? styles.dotActive : styles.dotInactive,
-            ]}
+      <View style={styles.dots}>
+        {GUIDE_SLIDES.map((slide, i) => (
+          <Pressable
+            key={slide.id}
+            accessibilityRole="button"
+            accessibilityLabel={`Show step ${i + 1}`}
+            hitSlop={8}
+            onPress={() => goTo(i)}
+            style={[styles.dot, activeIndex === i ? styles.dotActive : styles.dotInactive]}
           />
         ))}
       </View>
@@ -183,143 +155,64 @@ export const GuideCarousel: React.FC<GuideCarouselProps> = ({ onScanPress }) => 
 
 const styles = StyleSheet.create({
   container: {
-    width: '100%',
-    paddingVertical: 12,
+    gap: 10,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    marginBottom: 10,
   },
-  titleWithBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  sectionHeader: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: '#71717a',
-    letterSpacing: 0.8,
-  },
-  stepIndicator: {
-    fontSize: 10.5,
-    fontWeight: '600',
-    color: '#a1a1aa',
+  counter: {
+    fontVariant: ['tabular-nums'],
   },
   listContent: {
     paddingHorizontal: 16,
-    gap: 12,
+    gap: CARD_GAP,
   },
   card: {
-    backgroundColor: '#141417',
-    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: colors.line,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    gap: 12,
   },
-  cardTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  stepTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  stepTagText: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  badgePill: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  badgePillText: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: '#a1a1aa',
-    letterSpacing: 0.5,
-  },
-  cardContentRow: {
+  cardHead: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 10,
   },
-  iconWrapper: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+  iconTile: {
+    width: 40,
+    height: 40,
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardTextCol: {
+  cardTitles: {
     flex: 1,
+    gap: 1,
   },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.2,
+  cardAction: {
+    alignSelf: 'flex-start',
   },
-  cardSubtitle: {
-    fontSize: 11.5,
-    color: '#a1a1aa',
-    marginTop: 2,
-  },
-  cardDescription: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: '#71717a',
-  },
-  cardActionBtn: {
-    marginTop: 14,
-    backgroundColor: '#ef4444',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    gap: 6,
-  },
-  cardActionBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  paginationRow: {
+  dots: {
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
     gap: 6,
-    marginTop: 14,
   },
   dot: {
-    height: 4,
-    borderRadius: 2,
+    height: 6,
+    borderRadius: 3,
   },
   dotActive: {
     width: 20,
-    backgroundColor: '#ef4444',
+    backgroundColor: colors.brand,
   },
   dotInactive: {
     width: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
   },
 });

@@ -128,6 +128,39 @@ export const PRESET_TEMPLATES: Workspace[] = [
     ],
   },
   {
+    id: 'template-meeting-ready',
+    name: 'Meeting Ready',
+    icon: 'Video',
+    description: 'Open your calendar and notes, wait for the browser, then snap it to fill the screen.',
+    accentColor: 'amber',
+    actions: [
+      {
+        id: 'tpl-meet-1',
+        type: 'url',
+        label: 'Google Calendar',
+        target: 'https://calendar.google.com',
+      },
+      {
+        id: 'tpl-meet-2',
+        type: 'url',
+        label: 'Meeting Notes',
+        target: 'https://www.notion.so',
+      },
+      {
+        id: 'tpl-meet-3',
+        type: 'delay',
+        label: 'Wait for browser',
+        target: '1500',
+      },
+      {
+        id: 'tpl-meet-4',
+        type: 'hotkey',
+        label: 'Maximize window',
+        target: 'Win+Up',
+      },
+    ],
+  },
+  {
     id: 'template-content-creator',
     name: 'Content & Design Mode',
     icon: 'Sparkles',

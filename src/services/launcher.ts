@@ -4,9 +4,15 @@ import type {
   ActionExecutionProgress,
   LaunchReport,
 } from '../types/workspace';
-import { isTauriEnvironment } from './storage';
+import { Native, isTauriEnvironment } from './native';
 
 export type ProgressCallback = (progress: ActionExecutionProgress) => void;
+
+const MAX_DELAY_MS = 60_000;
+// Small gap between steps so windows open in order and the OS can keep up.
+const STEP_STAGGER_MS = 200;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class LauncherService {
   /**
@@ -16,57 +22,53 @@ export class LauncherService {
     const isTauri = isTauriEnvironment();
     const target = action.target.trim();
 
+    if (action.type === 'delay') {
+      const ms = Math.min(Math.max(Number(target) || 0, 0), MAX_DELAY_MS);
+      await sleep(ms);
+      return { success: true };
+    }
+
     if (!target) {
-      return { success: false, error: 'Target path or URL is empty.' };
+      return { success: false, error: 'This step has no target configured.' };
     }
 
     try {
       if (isTauri) {
-        const { open } = await import('@tauri-apps/plugin-shell');
-
         switch (action.type) {
           case 'url': {
-            const validUrl = /^https?:\/\//i.test(target) ? target : `https://${target}`;
-            await open(validUrl);
+            const { open } = await import('@tauri-apps/plugin-shell');
+            await open(/^[a-z][\w+.-]*:/i.test(target) ? target : `https://${target}`);
             break;
           }
           case 'folder':
           case 'file':
           case 'app': {
-            const normalizedTarget = target.replace(/\\/g, '/');
-            await open(normalizedTarget);
+            const { open } = await import('@tauri-apps/plugin-shell');
+            await open(target.replace(/\\/g, '/'));
             break;
           }
-        }
-        return { success: true };
-      } else {
-        // Web / Simulated Dev Mode fallback
-        await new Promise((resolve) => setTimeout(resolve, 350)); // Realistic smooth execution delay
-
-        switch (action.type) {
-          case 'url': {
-            const validUrl = /^https?:\/\//i.test(target) ? target : `https://${target}`;
-            const opened = window.open(validUrl, '_blank', 'noopener,noreferrer');
-            if (!opened) {
-              console.log(`[InFlow Web] Open URL: ${validUrl} (Popup blocked or handled)`);
-            }
+          case 'text':
+            // Keep the snippet exactly as written; trailing newlines are intentional "Enter" presses.
+            await Native.runNativeAction('text', action.target);
             break;
-          }
-          case 'folder': {
-            console.log(`[InFlow Web Mode] Opening Windows folder: ${target}`);
+          case 'command':
+          case 'hotkey':
+          case 'media':
+            await Native.runNativeAction(action.type, target);
             break;
-          }
-          case 'file': {
-            console.log(`[InFlow Web Mode] Opening File: ${target}`);
-            break;
-          }
-          case 'app': {
-            console.log(`[InFlow Web Mode] Spawning Executable: ${target}`);
-            break;
-          }
         }
         return { success: true };
       }
+
+      // Browser simulator: only URLs can really be opened; everything else is logged.
+      await sleep(250);
+      if (action.type === 'url') {
+        const validUrl = /^https?:\/\//i.test(target) ? target : `https://${target}`;
+        window.open(validUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        console.log(`[InFlow Simulator] ${action.type}: ${target}`);
+      }
+      return { success: true };
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error(`Error executing action [${action.label}]:`, errorMsg);
@@ -96,32 +98,29 @@ export class LauncherService {
     for (let i = 0; i < workspace.actions.length; i++) {
       const action = workspace.actions[i];
 
-      // Mark current action as running
       progressList[i].status = 'running';
       onProgress?.({ ...progressList[i] });
 
-      // Add a slight stagger delay for smooth visual feedback & OS buffer
-      if (i > 0) {
-        await new Promise((res) => setTimeout(res, 200));
+      if (i > 0 && action.type !== 'delay') {
+        await sleep(STEP_STAGGER_MS);
       }
 
       const result = await this.executeAction(action);
 
+      progressList[i].timestamp = Date.now();
       if (result.success) {
         progressList[i].status = 'success';
-        progressList[i].timestamp = Date.now();
         succeeded++;
       } else {
         progressList[i].status = 'error';
         progressList[i].error = result.error;
-        progressList[i].timestamp = Date.now();
         failed++;
       }
 
       onProgress?.({ ...progressList[i] });
     }
 
-    const report: LaunchReport = {
+    return {
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       startTime,
@@ -132,7 +131,5 @@ export class LauncherService {
       progressList,
       isComplete: true,
     };
-
-    return report;
   }
 }

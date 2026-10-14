@@ -1,118 +1,135 @@
 # InFlow ⚡
 
-> **One-Click Multi-Target Workspace Automation Launcher & Stream-Deck Mobile Platform**  
-> Built with **Tauri v2**, **Rust (Axum + Tokio + mDNS)**, **React 19**, **TypeScript**, **Tailwind CSS v4**, and **React Native (Expo)**.
+> **Turn your phone into a Stream Deck for your PC.**
+> Design a grid of keys on the desktop, pair your phone once, and every tap runs on your PC: whole workspaces, single apps, hotkeys, typed snippets, media keys or shell commands.
 
-InFlow transforms your daily startup routines (browser tabs, local folders, documentation files, and desktop applications) into single-click triggers. With the embedded local server and mobile deck platform, your smartphone acts as a **wireless Stream Deck** to trigger full workspaces directly on your connected PC.
+Built with **Tauri v2**, **Rust (Axum, Tokio, enigo, mDNS)**, **React 19**, **TypeScript**, **Tailwind CSS v4** and **React Native (Expo)**.
 
 ---
 
-## 🏛️ System Architecture
+## ✨ Highlights
+
+| | |
+|---|---|
+| **Multi-action workspaces** | One key opens sites, folders, files and apps in sequence, with delays and hotkeys between steps. |
+| **9 action types** | Website · App · Folder · File · Run command · Hotkey · Type text · Media key · Delay |
+| **Stream Deck editing** | Drag keys to rearrange, right-click for copy/paste/duplicate/clear, keyboard shortcuts, 5 grid sizes. |
+| **Folders** | Nest pages of keys behind a folder key, with an automatic Back key, exactly like a Stream Deck. |
+| **Built-in actions** | Media controls, Show desktop, Screenshot, Task Manager, Lock PC, ready to drag onto a key. |
+| **Live feedback** | Keys pressed on the phone flash on the desktop, the result (✓/✗) flashes back on the phone, and everything lands in the Activity log. |
+| **Command bar** | `Ctrl K` to launch any workspace, run any key or jump into any folder. |
+| **Secure pairing** | QR pairing with a per-PC token; devices without it get `401` on every endpoint. |
+| **System tray** | Closing the window keeps the deck server running; launch workspaces straight from the tray menu. |
+
+---
+
+## 🏛️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              INFLOW TAURI DESKTOP                               │
-│                                                                                 │
-│  ┌─────────────────────────┐     IPC Events     ┌────────────────────────────┐  │
-│  │   React Desktop UI      │ ◄────────────────► │  Rust Backend (Tauri v2)   │  │
-│  │  - Mobile Deck Builder  │                    │  - Axum Server (0.0.0.0)   │  │
-│  │  - QR Pairing Modal     │                    │  - mDNS Advertiser         │  │
-│  │  - LauncherService      │                    │  - Store & Shell Plugins   │  │
-│  └─────────────────────────┘                    └──────────────┬─────────────┘  │
-└────────────────────────────────────────────────────────────────┼────────────────┘
-                                                                 │
-                                          Local Wi-Fi Network    │  HTTP / WS
-                                          (mDNS / Port 8080)     ▼
-                                                ┌─────────────────────────────────┐
-                                                │          INFLOW MOBILE          │
-                                                │   (Stream Deck Style Companion) │
-                                                │   - Tap Button → Run on PC      │
-                                                │   - Real-time Glow & Sync       │
-                                                │   - Haptics & Desk-Dock Mode    │
-                                                └─────────────────────────────────┘
+┌──────────────────────────────── InFlow Desktop (Tauri) ────────────────────────────────┐
+│                                                                                       │
+│  React UI (deck studio)                         Rust backend                          │
+│  ├─ DeckCanvas / KeyInspector / Library  ◄────► ├─ actions.rs  hotkeys, text, media   │
+│  ├─ LauncherService (runs workspaces)    invoke │               keys (enigo), commands│
+│  └─ deckOps (pure deck editing helpers)  events ├─ server.rs   Axum HTTP + WebSocket  │
+│                                                 │               token auth, mDNS      │
+│                                                 └─ lib.rs      commands, system tray  │
+└───────────────────────────────────────────────────────────────┬───────────────────────┘
+                                                                │  Wi-Fi · port 8080
+                                                                │  Bearer / ?token=
+                                                                ▼
+                                          ┌──────────────── InFlow Companion (Expo) ─────┐
+                                          │  Landscape deck · folders · haptics          │
+                                          │  QR pairing · result flashes · keep-awake    │
+                                          └──────────────────────────────────────────────┘
 ```
 
----
+**How a key press travels**
 
-## 🖥️ PC Desktop Features
+1. The phone sends `TRIGGER_LAUNCH { slotId, pageId }` over the WebSocket.
+2. The Rust server checks the pairing token and emits a `remote-launch-trigger` event to the UI.
+3. The UI looks the key up **in its own deck** (the phone never decides what runs), executes it, and flashes the key.
+4. The UI calls `report_launch_result`; the server broadcasts `LAUNCH_RESULT` and the phone key flashes green or red.
 
-### 1. Dual-Protocol Embedded Server & Execution Bridge (Rust)
-- **Embedded Web Server (`src-tauri/src/server.rs`)**: Runs inside a background Tokio thread listening on `0.0.0.0:8080` with CORS support (`tower-http`).
-- **REST Endpoints**:
-  - `POST /api/launch`: Accepts `{ "workspace_id": "...", "action_id": "..." }` and dispatches execution to the desktop via Tauri IPC.
-  - `GET /api/status`: Returns current host IP, port, connected client count, and active workspace state.
-  - `GET / POST /api/deck`: Reads and updates the custom mobile deck configuration.
-- **WebSocket Gateway (`/ws`)**: Full-duplex connection for instant button triggers and real-time state synchronization (`DECK_CONFIG_UPDATE`, `ACTIVE_WORKSPACE_CHANGE`).
-- **mDNS Auto-Discovery (`mdns-sd`)**: Automatically broadcasts `_inflow._tcp` on local Wi-Fi for zero-configuration mobile pairing.
+### Server API
 
-### 2. Desktop UI & Mobile Deck Configurator (React)
-- **Direct-Click Workspace Cards**: Entire card operates as a direct launch button with keyboard navigation and isolated sub-action controls.
-- **Mobile Deck Visual Editor**:
-  - **Single Source of Truth**: All mobile buttons, icons, targets, labels, and colors are configured solely from the PC.
-  - Interactive phone mockup with live visual previews.
-  - Grid dimension switching: **2×3 (6 Keys)** and **3×4 (12 Keys)**.
-  - Dual-Page Manager: **Workspaces Deck** and **Quick Actions Deck**.
-  - Customization: Button labels, Lucide icons, and WCAG-compliant accent glow palettes.
-  - Desktop Test Trigger: Test-fire workflows directly from the configurator.
-- **QR Pairing Modal**: Generates dynamic QR codes (`inflow://<ip>:<port>`) for instant camera scanning and displays live connection diagnostics.
-- **Persistent Storage**: Saves workflows and deck setups to `@tauri-apps/plugin-store` and `localStorage`, with full JSON import/export capability.
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /api/status` | public | Reachability probe; reports `authorized` for the supplied token |
+| `GET /api/deck` | token | Current deck layout |
+| `POST /api/launch` | token | `{ slot_id, page_id }` or legacy `{ workspace_id, action_id }` |
+| `GET /ws?token=…` | token | Live sync: `CLIENT_CONNECTED`, `DECK_CONFIG_UPDATE`, `ACTIVE_WORKSPACE_CHANGE`, `LAUNCH_RESULT`, `PAIRING_REVOKED`, `PONG` |
+
+The token is an 8-character code (unambiguous alphabet), stored in the app data folder and embedded in the pairing QR code. **Reset pairing code** in the pairing dialog disconnects every phone immediately. If port 8080 is busy, the server falls back to 8081–8089; the QR code always carries the real port.
 
 ---
 
-## 📱 Mobile App (Stream Deck Companion in `mobile/`)
+## ⌨️ Desktop shortcuts
 
-The companion mobile app turns any smartphone into a wireless macro pad for your PC.
+| Shortcut | Action |
+|---|---|
+| `Ctrl K` | Command bar |
+| `← ↑ → ↓` | Move between keys |
+| `Enter` | Test-run the key / open the folder |
+| `Delete` | Clear the key |
+| `Ctrl C` / `Ctrl V` / `Ctrl D` | Copy, paste, duplicate |
+| `Esc` | Leave the current folder |
+| Double-click a page tab | Rename it |
 
-### 🎯 Features Implemented:
-1. **Dynamic PC-Driven Touch Grid**:
-   - Renders the exact button layout configured on the PC (2×3 or 3×4).
-   - Tapping a button triggers the workspace launch sequence on the connected PC.
-   - Dual-page navigation: **Workspaces** vs **Quick Actions**.
-2. **Tactile Mechanical Haptics (`expo-haptics`)**:
-   - Physical tactile click on button press.
-3. **Desk-Dock Mode (`expo-keep-awake`)**:
-   - Keeps screen awake when docked beside your monitor.
-4. **Camera QR Pairing (`expo-camera`)**:
-   - Instant pairing by scanning the QR code displayed in the desktop app.
-5. **Real-time Live Sync (`WebSocket` + `REST fallback`)**:
-   - Pushes live configuration changes and renders pulsing active states when a workspace is running on the PC.
+Hotkey and Type-text keys wait 3 seconds when test-run from the desktop, so you can focus the target window first.
 
 ---
 
-## 🛠️ Tech Stack
+## 📱 Mobile companion (`mobile/`)
 
-- **Desktop Framework**: [Tauri v2](https://v2.tauri.app/) (Rust + React 19)
-- **Backend (Rust)**: [Axum](https://github.com/tokio-rs/axum), [Tokio](https://tokio.rs/), [Tower-HTTP](https://github.com/tower-rs/tower-http), [mdns-sd](https://crates.io/crates/mdns-sd), [local-ip-address](https://crates.io/crates/local-ip-address)
-- **Desktop UI**: [React 19](https://react.dev/), [TypeScript](https://www.typescriptlang.org/), [Tailwind CSS v4](https://tailwindcss.com/)
-- **Mobile Stack**: [Expo / React Native](https://expo.dev/), `expo-camera`, `expo-haptics`, `expo-keep-awake`, `lucide-react-native`, `react-native-svg`
+Shares the desktop's design tokens (`mobile/src/ui/tokens.ts` mirrors `src/index.css`) and Geist typography, so keys look identical on both screens.
+
+- Renders the exact grid designed on the PC (2×3 up to 3×6) in an immersive landscape console, with the same key faces: accent glow, gradient, two-line titles.
+- Folder keys open nested pages; the first key of a folder goes back.
+- Green/red result ring on each key, reported back by the PC.
+- **Haptics tuned per gesture** (`mobile/src/services/haptics.ts`): a single crisp click on touch-down, light ticks for navigation, a distinct pattern for failures. On Android it uses the system haptic engine (`performAndroidHapticsAsync`) instead of the buzzy vibration motor. *Off / Crisp / Strong* levels in Settings.
+- Studio, Graphite and Daylight deck themes; desk-dock mode keeps the screen awake.
+- QR pairing (`expo-camera`) or manual entry of address + pairing code.
 
 ---
 
-## 🚀 Running the Apps
+## 🛠️ Tech stack
 
-### 1. Run PC Desktop Application
+- **Desktop:** [Tauri v2](https://v2.tauri.app/), React 19, TypeScript, Tailwind CSS v4, Geist & Geist Mono (bundled, works offline)
+- **Backend:** [Axum](https://github.com/tokio-rs/axum), [Tokio](https://tokio.rs/), [enigo](https://crates.io/crates/enigo) (input simulation), [mdns-sd](https://crates.io/crates/mdns-sd), tower-http
+- **Mobile:** [Expo](https://expo.dev/) / React Native, `expo-haptics`, `expo-camera`, `expo-keep-awake`, `react-native-svg`, Geist via `@expo-google-fonts`
+
+---
+
+## 🚀 Running
+
 ```bash
-# Web simulator mode (browser only):
+# Desktop app (starts the deck server on your LAN)
+npm install
+npm run tauri dev
+
+# Browser simulator (UI only, no server or native actions)
 npm run dev
 
-# Native Tauri desktop mode (launches Rust server on port 8080):
-npm run tauri dev
-```
-
-### 2. Run Mobile Companion App (Expo)
-```bash
-# In the root repository:
+# Mobile companion
 npm run mobile:start
 
-# Or navigate directly into the mobile directory:
-cd mobile
-npm install
-npm run start
+# Mobile UI in a browser (layout preview; no camera or haptics)
+npm --prefix mobile run web
 ```
-Scan the Expo QR code with **Expo Go** (Android/iOS) to run the Stream Deck companion on your phone!
+
+Then click **Pair phone** in the desktop app and scan the QR code from the companion app.
+
+### Checks
+
+```bash
+npm run build                      # type-check + production bundle
+npm run lint                       # oxlint
+cd src-tauri && cargo test         # hotkey parsing & pairing token tests
+```
 
 ---
 
 ## 📄 License
 
-MIT License. Built for seamless workflow automation.
+MIT License.

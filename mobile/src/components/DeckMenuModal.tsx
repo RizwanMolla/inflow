@@ -1,24 +1,10 @@
 import React from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  Modal,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-} from 'react-native';
-import {
-  X,
-  Palette,
-  Sliders,
-  LogOut,
-  Check,
-  Moon,
-  Sun,
-  Layers,
-} from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
-import { useTheme, DeckThemeMode } from '../utils/themeContext';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Check, ChevronRight, LogOut, SlidersHorizontal, Settings2 } from 'lucide-react-native';
+import { useTheme, THEMES, type DeckThemeMode } from '../utils/themeContext';
+import { AppText, Segmented, Sheet, StatusPill } from '../ui/primitives';
+import { colors, fonts, withAlpha } from '../ui/tokens';
+import { HAPTIC_OPTIONS, Haptics, useHapticLevel } from '../services/haptics';
 
 interface DeckMenuModalProps {
   visible: boolean;
@@ -35,323 +21,209 @@ export const DeckMenuModal: React.FC<DeckMenuModalProps> = ({
   onCloseDeck,
   isConnected,
 }) => {
-  const { theme, themeMode, setThemeMode } = useTheme();
-
-  if (!visible) return null;
-
-  const handleSelectTheme = (mode: DeckThemeMode) => {
-    Haptics.selectionAsync().catch(() => {});
-    setThemeMode(mode);
-  };
-
-  const themeOptions: { mode: DeckThemeMode; label: string; previewBg: string; previewBorder: string; icon: any }[] = [
-    {
-      mode: 'black',
-      label: 'Pitch Black',
-      previewBg: '#000000',
-      previewBorder: 'rgba(255, 255, 255, 0.25)',
-      icon: Moon,
-    },
-    {
-      mode: 'gray',
-      label: 'Titanium Gray',
-      previewBg: '#1e1e24',
-      previewBorder: 'rgba(255, 255, 255, 0.25)',
-      icon: Layers,
-    },
-    {
-      mode: 'white',
-      label: 'Studio White',
-      previewBg: '#f4f4f6',
-      previewBorder: 'rgba(0, 0, 0, 0.2)',
-      icon: Sun,
-    },
-  ];
+  const { themeMode, setThemeMode } = useTheme();
+  const [hapticLevel, setHapticLevel] = useHapticLevel();
 
   return (
-    <Modal
+    <Sheet
       visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
+      onClose={onClose}
+      title="Deck options"
+      icon={SlidersHorizontal}
+      accessory={<StatusPill tone={isConnected ? 'live' : 'offline'} label={isConnected ? 'Live' : 'Offline'} />}
+      maxWidth={460}
     >
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay}>
-          <TouchableWithoutFeedback>
-            <View style={[styles.menuContainer, { backgroundColor: theme.cardBg, borderColor: theme.border }]}>
-              {/* Menu Header */}
-              <View style={[styles.header, { borderBottomColor: theme.border }]}>
-                <View style={styles.headerLeft}>
-                  <Text style={[styles.title, { color: theme.text }]}>Deck Options</Text>
-                  {/* Status Indicator */}
-                  <View
-                    style={[
-                      styles.statusPill,
-                      {
-                        backgroundColor: isConnected
-                          ? 'rgba(16, 185, 129, 0.15)'
-                          : 'rgba(239, 68, 68, 0.15)',
-                        borderColor: isConnected
-                          ? 'rgba(16, 185, 129, 0.35)'
-                          : 'rgba(239, 68, 68, 0.35)',
-                      },
-                    ]}
-                  >
+      <View style={styles.section}>
+        <AppText variant="eyebrow">Deck theme</AppText>
+        <View style={styles.themeRow}>
+          {(Object.keys(THEMES) as DeckThemeMode[]).map((mode) => {
+            const t = THEMES[mode];
+            const selected = themeMode === mode;
+            return (
+              <Pressable
+                key={mode}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={`${t.label} theme`}
+                onPress={() => {
+                  if (selected) return;
+                  setThemeMode(mode);
+                  Haptics.tick();
+                }}
+                style={({ pressed }) => [
+                  styles.themeCard,
+                  {
+                    backgroundColor: t.canvas,
+                    borderColor: selected ? colors.brand : t.isLight ? 'rgba(0,0,0,0.12)' : colors.lineStrong,
+                    transform: [{ scale: pressed ? 0.97 : 1 }],
+                  },
+                ]}
+              >
+                {/* Two tiny keys preview the theme's key face */}
+                <View style={styles.swatchRow}>
+                  {['#818cf8', '#fbbf24'].map((accent) => (
                     <View
+                      key={accent}
                       style={[
-                        styles.statusDot,
-                        { backgroundColor: isConnected ? '#10b981' : '#ef4444' },
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        styles.statusText,
-                        { color: isConnected ? '#34d399' : '#f87171' },
+                        styles.swatchKey,
+                        { backgroundColor: t.keyTop, borderColor: withAlpha(accent, t.isLight ? 0.45 : 0.4) },
                       ]}
                     >
-                      {isConnected ? 'LIVE SYNC' : 'DISCONNECTED'}
-                    </Text>
-                  </View>
+                      <View style={[styles.swatchGlyph, { backgroundColor: accent }]} />
+                    </View>
+                  ))}
                 </View>
-                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                  <X size={18} color={theme.textSecondary} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Theme Selection Section */}
-              <View style={styles.section}>
-                <View style={styles.sectionTitleRow}>
-                  <Palette size={14} color={theme.accent} />
-                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>SELECT THEME</Text>
-                </View>
-                <View style={styles.themeRow}>
-                  {themeOptions.map((opt) => {
-                    const isSelected = themeMode === opt.mode;
-                    const IconComp = opt.icon;
-                    return (
-                      <TouchableOpacity
-                        key={opt.mode}
-                        onPress={() => handleSelectTheme(opt.mode)}
-                        activeOpacity={0.8}
-                        style={[
-                          styles.themeButton,
-                          {
-                            backgroundColor: opt.previewBg,
-                            borderColor: isSelected ? theme.accent : opt.previewBorder,
-                          },
-                          isSelected && styles.themeButtonSelected,
-                        ]}
-                      >
-                        <IconComp
-                          size={16}
-                          color={opt.mode === 'white' ? '#18181b' : '#ffffff'}
-                        />
-                        <Text
-                          style={[
-                            styles.themeBtnText,
-                            { color: opt.mode === 'white' ? '#18181b' : '#ffffff' },
-                          ]}
-                        >
-                          {opt.label}
-                        </Text>
-                        {isSelected && (
-                          <View style={styles.checkBadge}>
-                            <Check size={12} color="#ffffff" />
-                          </View>
-                        )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              {/* Action Buttons */}
-              <View style={styles.actionsList}>
-                {/* Open Settings */}
-                <TouchableOpacity
-                  onPress={() => {
-                    onClose();
-                    onOpenSettings();
-                  }}
-                  style={[styles.actionRow, { borderBottomColor: theme.border }]}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.actionRowLeft}>
-                    <View style={[styles.actionIconBox, { backgroundColor: `${theme.accent}15` }]}>
-                      <Sliders size={16} color={theme.accent} />
-                    </View>
-                    <View>
-                      <Text style={[styles.actionText, { color: theme.text }]}>Settings & Network</Text>
-                      <Text style={[styles.actionSubtext, { color: theme.textSecondary }]}>IP, port & keep-awake options</Text>
-                    </View>
+                <AppText style={[styles.themeLabel, { color: t.ink }]}>{t.label}</AppText>
+                {selected && (
+                  <View style={styles.checkBadge}>
+                    <Check size={10} color="#fff" strokeWidth={3} />
                   </View>
-                </TouchableOpacity>
-
-                {/* Close Deck */}
-                <TouchableOpacity
-                  onPress={() => {
-                    onClose();
-                    onCloseDeck();
-                  }}
-                  style={styles.actionRow}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.actionRowLeft}>
-                    <View style={[styles.actionIconBox, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                      <LogOut size={16} color="#ef4444" />
-                    </View>
-                    <View>
-                      <Text style={[styles.actionText, { color: '#ef4444' }]}>Close Deck</Text>
-                      <Text style={[styles.actionSubtext, { color: theme.textSecondary }]}>Return to companion home</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </TouchableWithoutFeedback>
+                )}
+              </Pressable>
+            );
+          })}
         </View>
-      </TouchableWithoutFeedback>
-    </Modal>
+      </View>
+
+      <View style={styles.section}>
+        <AppText variant="eyebrow">Haptic feedback</AppText>
+        <Segmented value={hapticLevel} options={HAPTIC_OPTIONS} onChange={setHapticLevel} />
+      </View>
+
+      <View style={styles.actions}>
+        <MenuRow
+          icon={Settings2}
+          title="Connection & settings"
+          subtitle="PC address, pairing code, keep-awake"
+          onPress={() => {
+            onClose();
+            onOpenSettings();
+          }}
+        />
+        <View style={styles.rowDivider} />
+        <MenuRow
+          icon={LogOut}
+          title="Exit deck"
+          subtitle="Back to the companion home screen"
+          danger
+          onPress={() => {
+            onClose();
+            onCloseDeck();
+          }}
+        />
+      </View>
+    </Sheet>
   );
 };
 
+const MenuRow: React.FC<{
+  icon: React.ComponentType<{ size?: number; color?: string }>;
+  title: string;
+  subtitle: string;
+  danger?: boolean;
+  onPress: () => void;
+}> = ({ icon: Icon, title, subtitle, danger, onPress }) => (
+  <Pressable
+    accessibilityRole="button"
+    onPressIn={() => Haptics.tick()}
+    onPress={onPress}
+    style={({ pressed }) => [styles.row, pressed && { backgroundColor: 'rgba(255,255,255,0.05)' }]}
+  >
+    <View
+      style={[
+        styles.rowIcon,
+        { backgroundColor: danger ? withAlpha(colors.brand, 0.12) : 'rgba(255,255,255,0.05)' },
+      ]}
+    >
+      <Icon size={16} color={danger ? colors.brandInk : colors.ink2} />
+    </View>
+    <View style={styles.rowText}>
+      <AppText variant="sm" color={danger ? colors.brandInk : colors.ink}>
+        {title}
+      </AppText>
+      <AppText variant="micro" color={colors.ink3}>
+        {subtitle}
+      </AppText>
+    </View>
+    {!danger && <ChevronRight size={16} color={colors.ink3} />}
+  </Pressable>
+);
+
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  menuContainer: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 20,
-    borderWidth: 1,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  statusText: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  title: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  closeBtn: {
-    padding: 4,
-  },
   section: {
-    padding: 16,
-  },
-  sectionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 10,
-  },
-  sectionTitle: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    letterSpacing: 0.6,
+    gap: 10,
   },
   themeRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
-  themeButton: {
+  themeCard: {
     flex: 1,
-    height: 58,
-    borderRadius: 12,
+    height: 84,
+    borderRadius: 14,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 6,
-    position: 'relative',
+    gap: 8,
   },
-  themeButtonSelected: {
-    borderWidth: 2,
+  swatchRow: {
+    flexDirection: 'row',
+    gap: 5,
   },
-  themeBtnText: {
-    fontSize: 10.5,
-    fontWeight: '600',
-    marginTop: 4,
+  swatchKey: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swatchGlyph: {
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+  },
+  themeLabel: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
   },
   checkBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: '#ef4444',
-    borderRadius: 10,
+    top: 6,
+    right: 6,
     width: 16,
     height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionsList: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    gap: 8,
+  actions: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    overflow: 'hidden',
   },
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    borderRadius: 10,
-  },
-  actionRowLeft: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
   },
-  actionIconBox: {
+  rowIcon: {
     width: 34,
     height: 34,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionText: {
-    fontSize: 13,
-    fontWeight: '600',
+  rowText: {
+    flex: 1,
+    gap: 1,
   },
-  actionSubtext: {
-    fontSize: 10,
-    marginTop: 2,
+  rowDivider: {
+    height: 1,
+    backgroundColor: colors.line,
   },
 });

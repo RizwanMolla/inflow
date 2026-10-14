@@ -1,38 +1,56 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
-    http::{Method, StatusCode},
-    response::{IntoResponse, Json},
+    http::{HeaderMap, Method, StatusCode},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use local_ip_address::local_ip;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tower_http::cors::CorsLayer;
+
+pub const SERVER_VERSION: &str = "2.0.0";
+const PREFERRED_PORT: u16 = 8080;
+const PORT_ATTEMPTS: u16 = 10;
+// Unambiguous alphabet (no 0/O, 1/I) so the code can be typed by hand from the pairing screen.
+const TOKEN_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const TOKEN_LEN: usize = 8;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct LaunchPayload {
-    pub workspace_id: String,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     #[serde(default)]
     pub action_id: Option<String>,
+    #[serde(default)]
+    pub slot_id: Option<String>,
+    #[serde(default)]
+    pub page_id: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct ServerStatusResponse {
+#[derive(Clone, Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatus {
+    pub online: bool,
     pub ip: String,
     pub port: u16,
     pub connected_clients: usize,
     pub active_workspace_id: Option<String>,
     pub server_version: String,
+    pub error: Option<String>,
 }
 
 #[derive(Clone)]
@@ -41,40 +59,177 @@ pub struct AppState {
     pub active_workspace_id: Arc<Mutex<Option<String>>>,
     pub deck_config: Arc<Mutex<serde_json::Value>>,
     pub tx: broadcast::Sender<String>,
-    pub client_count: Arc<Mutex<usize>>,
+    pub client_count: Arc<AtomicUsize>,
     pub local_ip: String,
-    pub port: u16,
+    pub port: Arc<AtomicU16>,
+    pub online: Arc<AtomicBool>,
+    pub last_error: Arc<Mutex<Option<String>>>,
+    pub token: Arc<Mutex<String>>,
+    /// Bumped whenever the pairing token is regenerated; sockets opened under an
+    /// older epoch close themselves so revoked phones are disconnected immediately.
+    pub token_epoch: Arc<AtomicU64>,
+    token_path: Option<PathBuf>,
 }
 
-pub fn start_server(app_handle: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        let port: u16 = 8080;
+impl AppState {
+    pub fn new(app_handle: AppHandle, data_dir: Option<PathBuf>) -> Self {
         let local_ipv4 = match local_ip() {
             Ok(ip) => ip.to_string(),
             Err(e) => {
-                eprintln!("[InFlow Server] Warning: Could not detect local IPv4 ({:?}), defaulting to 127.0.0.1", e);
+                eprintln!("[InFlow Server] Could not detect local IPv4 ({e:?}), using 127.0.0.1");
                 "127.0.0.1".to_string()
             }
         };
+        let token_path = data_dir.map(|d| d.join("pairing.json"));
+        let token = token_path
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.get("token").and_then(|t| t.as_str()).map(str::to_string))
+            .filter(|t| t.len() == TOKEN_LEN)
+            .unwrap_or_else(generate_token);
 
-        println!("[InFlow Server] Local IPv4 detected: {}", local_ipv4);
-
-        // Start mDNS Service Advertisement in background
-        start_mdns_advertiser(&local_ipv4, port);
-
-        let (tx, _rx) = broadcast::channel::<String>(100);
-
-        let state = AppState {
-            app_handle: app_handle.clone(),
+        let (tx, _rx) = broadcast::channel::<String>(128);
+        let state = Self {
+            app_handle,
             active_workspace_id: Arc::new(Mutex::new(None)),
             deck_config: Arc::new(Mutex::new(serde_json::Value::Null)),
-            tx: tx.clone(),
-            client_count: Arc::new(Mutex::new(0)),
-            local_ip: local_ipv4.clone(),
-            port,
+            tx,
+            client_count: Arc::new(AtomicUsize::new(0)),
+            local_ip: local_ipv4,
+            port: Arc::new(AtomicU16::new(PREFERRED_PORT)),
+            online: Arc::new(AtomicBool::new(false)),
+            last_error: Arc::new(Mutex::new(None)),
+            token: Arc::new(Mutex::new(token)),
+            token_epoch: Arc::new(AtomicU64::new(0)),
+            token_path,
         };
+        state.persist_token();
+        state
+    }
 
-        // Permissive CORS for local mobile apps and dev simulators
+    pub fn token(&self) -> String {
+        self.token.lock().unwrap().clone()
+    }
+
+    fn persist_token(&self) {
+        if let Some(path) = &self.token_path {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let body = serde_json::json!({ "token": self.token() }).to_string();
+            if let Err(e) = std::fs::write(path, body) {
+                eprintln!("[InFlow Server] Failed to persist pairing token: {e:?}");
+            }
+        }
+    }
+
+    /// Issues a new pairing token and disconnects every phone paired with the old one.
+    pub fn regenerate_token(&self) -> String {
+        let fresh = generate_token();
+        *self.token.lock().unwrap() = fresh.clone();
+        self.persist_token();
+        self.token_epoch.fetch_add(1, Ordering::SeqCst);
+        self.broadcast("PAIRING_REVOKED", serde_json::json!({}));
+        fresh
+    }
+
+    pub fn status(&self) -> ServerStatus {
+        ServerStatus {
+            online: self.online.load(Ordering::SeqCst),
+            ip: self.local_ip.clone(),
+            port: self.port.load(Ordering::SeqCst),
+            connected_clients: self.client_count.load(Ordering::SeqCst),
+            active_workspace_id: self.active_workspace_id.lock().unwrap().clone(),
+            server_version: SERVER_VERSION.to_string(),
+            error: self.last_error.lock().unwrap().clone(),
+        }
+    }
+
+    pub fn emit_status(&self) {
+        let _ = self.app_handle.emit("server-status", self.status());
+    }
+
+    pub fn broadcast(&self, kind: &str, payload: serde_json::Value) {
+        let msg = serde_json::json!({ "type": kind, "payload": payload });
+        let _ = self.tx.send(msg.to_string());
+    }
+
+    pub fn set_deck_config(&self, deck: serde_json::Value) {
+        *self.deck_config.lock().unwrap() = deck.clone();
+        self.broadcast("DECK_CONFIG_UPDATE", deck);
+    }
+
+    /// Forwards a key press from a phone to the desktop UI, which owns the
+    /// workspace data and performs the actual launch.
+    fn dispatch_trigger(&self, payload: &LaunchPayload, source: &str) -> Result<(), String> {
+        let has_target = payload.workspace_id.as_deref().is_some_and(|s| !s.is_empty())
+            || payload.slot_id.as_deref().is_some_and(|s| !s.is_empty());
+        if !has_target {
+            return Err("workspace_id or slot_id is required".into());
+        }
+
+        self.app_handle
+            .emit(
+                "remote-launch-trigger",
+                serde_json::json!({
+                    "workspaceId": payload.workspace_id,
+                    "actionId": payload.action_id,
+                    "slotId": payload.slot_id,
+                    "pageId": payload.page_id,
+                    "source": source,
+                }),
+            )
+            .map_err(|e| format!("Failed to dispatch to desktop launcher: {e:?}"))
+    }
+}
+
+fn generate_token() -> String {
+    let mut rng = rand::thread_rng();
+    (0..TOKEN_LEN)
+        .map(|_| TOKEN_ALPHABET[rng.gen_range(0..TOKEN_ALPHABET.len())] as char)
+        .collect()
+}
+
+/// Accepts "ABCD-EFGH", "abcd efgh" etc. so manually typed codes still match.
+fn normalize_token(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect()
+}
+
+fn token_matches(expected: &str, provided: &str) -> bool {
+    let provided = normalize_token(provided);
+    let (a, b) = (expected.as_bytes(), provided.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn is_authorized(state: &AppState, headers: &HeaderMap, query: &HashMap<String, String>) -> bool {
+    let from_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let provided = from_header.or_else(|| query.get("token").map(String::as_str));
+    provided.is_some_and(|p| token_matches(&state.token(), p))
+}
+
+fn unauthorized() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({
+            "success": false,
+            "error": "Pairing required. Scan the QR code shown in InFlow on your PC."
+        })),
+    )
+        .into_response()
+}
+
+pub fn start_server(state: AppState) {
+    tauri::async_runtime::spawn(async move {
         let cors = CorsLayer::new()
             .allow_origin(tower_http::cors::Any)
             .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
@@ -87,264 +242,217 @@ pub fn start_server(app_handle: AppHandle) {
         let app = Router::new()
             .route("/api/launch", post(launch_handler))
             .route("/api/status", get(status_handler))
-            .route("/api/deck", get(get_deck_handler).post(update_deck_handler))
+            .route("/api/deck", get(get_deck_handler))
             .route("/ws", get(ws_handler))
             .layer(cors)
             .with_state(state.clone());
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        println!("[InFlow Server] Binding dual HTTP/WS server on http://0.0.0.0:{}", port);
-
-        match tokio::net::TcpListener::bind(addr).await {
-            Ok(listener) => {
-                if let Err(e) = axum::serve(listener, app.into_make_service()).await {
-                    eprintln!("[InFlow Server] Server error: {:?}", e);
+        // Fall back to the next free port if 8080 is taken; the QR code carries the real port.
+        let mut listener = None;
+        let mut last_bind_error = None;
+        for port in PREFERRED_PORT..PREFERRED_PORT + PORT_ATTEMPTS {
+            match tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await {
+                Ok(l) => {
+                    state.port.store(port, Ordering::SeqCst);
+                    listener = Some(l);
+                    break;
                 }
+                Err(e) => last_bind_error = Some(format!("Port {port}: {e}")),
             }
-            Err(e) => {
-                eprintln!("[InFlow Server] Failed to bind port {}: {:?}", port, e);
-            }
+        }
+
+        let Some(listener) = listener else {
+            let msg = format!(
+                "Could not bind ports {}-{} ({})",
+                PREFERRED_PORT,
+                PREFERRED_PORT + PORT_ATTEMPTS - 1,
+                last_bind_error.unwrap_or_default()
+            );
+            eprintln!("[InFlow Server] {msg}");
+            *state.last_error.lock().unwrap() = Some(msg);
+            state.emit_status();
+            return;
+        };
+
+        let port = state.port.load(Ordering::SeqCst);
+        println!("[InFlow Server] Listening on http://0.0.0.0:{port} ({})", state.local_ip);
+        start_mdns_advertiser(&state.local_ip, port);
+        state.online.store(true, Ordering::SeqCst);
+        state.emit_status();
+
+        if let Err(e) = axum::serve(listener, app.into_make_service()).await {
+            eprintln!("[InFlow Server] Server error: {e:?}");
+            state.online.store(false, Ordering::SeqCst);
+            *state.last_error.lock().unwrap() = Some(e.to_string());
+            state.emit_status();
         }
     });
 }
 
 fn start_mdns_advertiser(local_ip_str: &str, port: u16) {
     let local_ip_str = local_ip_str.to_string();
-    std::thread::spawn(move || {
-        match ServiceDaemon::new() {
-            Ok(mdns) => {
-                let service_type = "_inflow._tcp.local.";
-                let instance_name = "inflow-desktop";
-                let host_name = "inflow-host.local.";
-                let mut properties = HashMap::new();
-                properties.insert("version".to_string(), "1.0.0".to_string());
-                properties.insert("protocol".to_string(), "http-ws".to_string());
-                properties.insert("ip".to_string(), local_ip_str.clone());
-                properties.insert("port".to_string(), port.to_string());
+    std::thread::spawn(move || match ServiceDaemon::new() {
+        Ok(mdns) => {
+            let mut properties = HashMap::new();
+            properties.insert("version".to_string(), SERVER_VERSION.to_string());
+            properties.insert("protocol".to_string(), "http-ws".to_string());
+            properties.insert("auth".to_string(), "token".to_string());
 
-                match ServiceInfo::new(
-                    service_type,
-                    instance_name,
-                    host_name,
-                    &local_ip_str,
-                    port,
-                    properties,
-                ) {
-                    Ok(service_info) => {
-                        if let Err(err) = mdns.register(service_info) {
-                            eprintln!("[InFlow mDNS] Failed to register service: {:?}", err);
-                        } else {
-                            println!("[InFlow mDNS] Advertising service _inflow._tcp on port {} ({})", port, local_ip_str);
-                        }
-                    }
-                    Err(err) => {
-                        eprintln!("[InFlow mDNS] Failed to create ServiceInfo: {:?}", err);
-                    }
-                }
-            }
-            Err(err) => {
-                eprintln!("[InFlow mDNS] Failed to initialize mDNS daemon: {:?}", err);
+            match ServiceInfo::new(
+                "_inflow._tcp.local.",
+                "inflow-desktop",
+                "inflow-host.local.",
+                &local_ip_str,
+                port,
+                properties,
+            ) {
+                Ok(info) => match mdns.register(info) {
+                    Ok(_) => println!("[InFlow mDNS] Advertising _inflow._tcp on {local_ip_str}:{port}"),
+                    Err(err) => eprintln!("[InFlow mDNS] Failed to register service: {err:?}"),
+                },
+                Err(err) => eprintln!("[InFlow mDNS] Failed to create ServiceInfo: {err:?}"),
             }
         }
+        Err(err) => eprintln!("[InFlow mDNS] Failed to initialize mDNS daemon: {err:?}"),
     });
 }
 
-// REST Handlers
+// --- REST handlers ---
+
 async fn launch_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
     Json(payload): Json<LaunchPayload>,
-) -> impl IntoResponse {
-    if payload.workspace_id.trim().is_empty() {
-        return (
+) -> Response {
+    if !is_authorized(&state, &headers, &query) {
+        return unauthorized();
+    }
+    match state.dispatch_trigger(&payload, "phone") {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "success": true, "message": "Launch sequence initiated on desktop" })),
+        )
+            .into_response(),
+        Err(error) => (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "success": false,
-                "error": "workspace_id cannot be empty"
-            })),
-        );
+            Json(serde_json::json!({ "success": false, "error": error })),
+        )
+            .into_response(),
     }
-
-    println!("[InFlow Server] Received remote launch trigger for: {}", payload.workspace_id);
-
-    // Update active workspace state
-    {
-        let mut active = state.active_workspace_id.lock().unwrap();
-        *active = Some(payload.workspace_id.clone());
-    }
-
-    // Broadcast active workspace update over WebSocket to all mobile clients
-    let ws_msg = serde_json::json!({
-        "type": "ACTIVE_WORKSPACE_CHANGE",
-        "payload": {
-            "activeWorkspaceId": payload.workspace_id.clone(),
-            "actionId": payload.action_id.clone()
-        }
-    });
-    let _ = state.tx.send(ws_msg.to_string());
-
-    // Emit Tauri event to React Desktop UI to trigger LauncherService execution
-    let emit_res = state.app_handle.emit(
-        "remote-launch-trigger",
-        serde_json::json!({
-            "workspaceId": payload.workspace_id,
-            "actionId": payload.action_id
-        }),
-    );
-
-    if let Err(e) = emit_res {
-        eprintln!("[InFlow Server] Failed to emit Tauri event: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "success": false,
-                "error": format!("Failed to dispatch to desktop launcher: {:?}", e)
-            })),
-        );
-    }
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "success": true,
-            "workspace_id": payload.workspace_id,
-            "message": "Launch sequence initiated on desktop"
-        })),
-    )
 }
 
-async fn status_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let clients = *state.client_count.lock().unwrap();
-    let active_ws = state.active_workspace_id.lock().unwrap().clone();
-
-    let response = ServerStatusResponse {
-        ip: state.local_ip.clone(),
-        port: state.port,
-        connected_clients: clients,
-        active_workspace_id: active_ws,
-        server_version: "1.0.0".to_string(),
-    };
-
-    (StatusCode::OK, Json(response))
-}
-
-async fn get_deck_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let deck = state.deck_config.lock().unwrap().clone();
-    (StatusCode::OK, Json(deck))
-}
-
-async fn update_deck_handler(
+/// Public so phones can probe reachability; `authorized` tells them whether their token is valid.
+async fn status_handler(
     State(state): State<AppState>,
-    Json(deck_json): Json<serde_json::Value>,
-) -> impl IntoResponse {
-    {
-        let mut deck = state.deck_config.lock().unwrap();
-        *deck = deck_json.clone();
-    }
-
-    // Broadcast updated deck to all connected mobile clients
-    let ws_msg = serde_json::json!({
-        "type": "DECK_CONFIG_UPDATE",
-        "payload": deck_json
-    });
-    let _ = state.tx.send(ws_msg.to_string());
-
-    (StatusCode::OK, Json(serde_json::json!({ "success": true })))
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    let status = state.status();
+    Json(serde_json::json!({
+        "server_version": status.server_version,
+        "connected_clients": status.connected_clients,
+        "auth_required": true,
+        "authorized": is_authorized(&state, &headers, &query),
+    }))
+    .into_response()
 }
 
-// WebSocket Handler
+async fn get_deck_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    if !is_authorized(&state, &headers, &query) {
+        return unauthorized();
+    }
+    let deck = state.deck_config.lock().unwrap().clone();
+    (StatusCode::OK, Json(deck)).into_response()
+}
+
+// --- WebSocket ---
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
-) -> impl IntoResponse {
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
+    if !is_authorized(&state, &headers, &query) {
+        return unauthorized();
+    }
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.tx.subscribe();
+    let epoch = state.token_epoch.load(Ordering::SeqCst);
+    // Replies meant only for this client (e.g. PONG) bypass the broadcast channel.
+    let (direct_tx, mut direct_rx) = mpsc::unbounded_channel::<String>();
 
-    // Increment client counter
-    {
-        let mut count = state.client_count.lock().unwrap();
-        *count += 1;
-        println!("[InFlow WS] Client connected. Total active clients: {}", *count);
-    }
+    let count = state.client_count.fetch_add(1, Ordering::SeqCst) + 1;
+    println!("[InFlow WS] Client connected. Active clients: {count}");
+    state.emit_status();
 
-    // Send initial handshake with current state and deck config
-    let initial_deck = state.deck_config.lock().unwrap().clone();
-    let active_ws = state.active_workspace_id.lock().unwrap().clone();
     let init_msg = serde_json::json!({
         "type": "CLIENT_CONNECTED",
         "payload": {
-            "serverVersion": "1.0.0",
-            "activeWorkspaceId": active_ws,
-            "deckConfig": initial_deck
+            "serverVersion": SERVER_VERSION,
+            "activeWorkspaceId": state.active_workspace_id.lock().unwrap().clone(),
+            "deckConfig": state.deck_config.lock().unwrap().clone(),
         }
     });
+    let _ = sender.send(Message::Text(init_msg.to_string().into())).await;
 
-    if let Ok(init_txt) = serde_json::to_string(&init_msg) {
-        let _ = sender.send(Message::Text(init_txt.into())).await;
-    }
-
-    let state_clone = state.clone();
-
-    // Task for sending broadcasts to this WebSocket client
+    let epoch_ref = state.token_epoch.clone();
     let mut send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
+        loop {
+            let msg = tokio::select! {
+                msg = rx.recv() => match msg {
+                    Ok(m) => m,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break,
+                },
+                msg = direct_rx.recv() => match msg {
+                    Some(m) => m,
+                    None => break,
+                },
+            };
             if sender.send(Message::Text(msg.into())).await.is_err() {
+                break;
+            }
+            if epoch_ref.load(Ordering::SeqCst) != epoch {
+                let _ = sender.send(Message::Close(None)).await;
                 break;
             }
         }
     });
 
-    // Task for receiving messages from this WebSocket client
     let state_for_recv = state.clone();
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
-            if let Message::Text(text) = msg {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if let Some(msg_type) = parsed.get("type").and_then(|t| t.as_str()) {
-                        match msg_type {
-                            "TRIGGER_LAUNCH" => {
-                                if let Some(payload) = parsed.get("payload") {
-                                    if let Some(ws_id) = payload.get("workspaceId").and_then(|s| s.as_str()) {
-                                        let action_id = payload.get("actionId").and_then(|s| s.as_str()).map(|s| s.to_string());
-                                        
-                                        // Update active state
-                                        {
-                                            let mut active = state_for_recv.active_workspace_id.lock().unwrap();
-                                            *active = Some(ws_id.to_string());
-                                        }
-
-                                        // Emit event to React desktop UI
-                                        let _ = state_for_recv.app_handle.emit(
-                                            "remote-launch-trigger",
-                                            serde_json::json!({
-                                                "workspaceId": ws_id,
-                                                "actionId": action_id
-                                            }),
-                                        );
-
-                                        // Broadcast active state change
-                                        let broadcast_active = serde_json::json!({
-                                            "type": "ACTIVE_WORKSPACE_CHANGE",
-                                            "payload": {
-                                                "activeWorkspaceId": ws_id,
-                                                "actionId": action_id
-                                            }
-                                        });
-                                        let _ = state_for_recv.tx.send(broadcast_active.to_string());
-                                    }
-                                }
-                            }
-                            "PING" => {
-                                let pong = serde_json::json!({ "type": "PONG", "payload": { "time": chrono_timestamp() } });
-                                let _ = state_for_recv.tx.send(pong.to_string());
-                            }
-                            _ => {}
-                        }
+            let Message::Text(text) = msg else { continue };
+            let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+            match parsed.get("type").and_then(|t| t.as_str()) {
+                Some("TRIGGER_LAUNCH") => {
+                    let p = parsed.get("payload").cloned().unwrap_or_default();
+                    let field = |k: &str| p.get(k).and_then(|v| v.as_str()).map(str::to_string);
+                    let payload = LaunchPayload {
+                        workspace_id: field("workspaceId"),
+                        action_id: field("actionId"),
+                        slot_id: field("slotId"),
+                        page_id: field("pageId"),
+                    };
+                    if let Err(e) = state_for_recv.dispatch_trigger(&payload, "phone") {
+                        eprintln!("[InFlow WS] Ignored trigger: {e}");
                     }
                 }
+                Some("PING") => {
+                    let pong = serde_json::json!({ "type": "PONG", "payload": { "time": now_millis() } });
+                    let _ = direct_tx.send(pong.to_string());
+                }
+                _ => {}
             }
         }
     });
@@ -354,19 +462,42 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         _ = (&mut recv_task) => send_task.abort(),
     }
 
-    // Decrement client counter on disconnect
-    {
-        let mut count = state_clone.client_count.lock().unwrap();
-        if *count > 0 {
-            *count -= 1;
-        }
-        println!("[InFlow WS] Client disconnected. Active clients: {}", *count);
-    }
+    let remaining = state
+        .client_count
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| Some(c.saturating_sub(1)))
+        .map(|prev| prev.saturating_sub(1))
+        .unwrap_or(0);
+    println!("[InFlow WS] Client disconnected. Active clients: {remaining}");
+    state.emit_status();
 }
 
-fn chrono_timestamp() -> u64 {
+fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_tokens_use_the_unambiguous_alphabet() {
+        for _ in 0..50 {
+            let t = generate_token();
+            assert_eq!(t.len(), TOKEN_LEN);
+            assert!(t.bytes().all(|b| TOKEN_ALPHABET.contains(&b)));
+        }
+    }
+
+    #[test]
+    fn manual_codes_are_normalized_before_matching() {
+        assert!(token_matches("ABCD2345", "ABCD2345"));
+        assert!(token_matches("ABCD2345", "abcd-2345"));
+        assert!(token_matches("ABCD2345", " abcd 2345 "));
+        assert!(!token_matches("ABCD2345", "ABCD2346"));
+        assert!(!token_matches("ABCD2345", "ABCD234"));
+        assert!(!token_matches("ABCD2345", ""));
+    }
 }

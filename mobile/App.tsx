@@ -1,44 +1,38 @@
-import React, { useState, useEffect } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  Dimensions,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { useKeepAwake } from 'expo-keep-awake';
-import {
-  Zap,
-  QrCode,
-  Sliders,
-  Play,
-  Wifi,
-  WifiOff,
-  Radio,
-  Sparkles,
-  Layers,
-  ArrowUpRight,
-  ShieldCheck,
-  Smartphone,
-  ChevronRight,
-} from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import * as SplashScreen from 'expo-splash-screen';
+import { useFonts } from 'expo-font';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+// Per-weight imports: the package index would bundle all 18 weights of each family.
+import { Geist_400Regular } from '@expo-google-fonts/geist/400Regular';
+import { Geist_500Medium } from '@expo-google-fonts/geist/500Medium';
+import { Geist_600SemiBold } from '@expo-google-fonts/geist/600SemiBold';
+import { Geist_700Bold } from '@expo-google-fonts/geist/700Bold';
+import { GeistMono_500Medium } from '@expo-google-fonts/geist-mono/500Medium';
+import { Play, QrCode, RefreshCw, Settings2, Zap } from 'lucide-react-native';
 
-import type {
-  DeckConfig,
-  DeckSlot,
-  ConnectionConfig,
-  ConnectionState,
-} from './src/types/deck';
+import type { DeckConfig, DeckSlot, ConnectionConfig, ConnectionState } from './src/types/deck';
 import { ConnectionService } from './src/services/connection';
+import { Haptics } from './src/services/haptics';
 import { QRScannerModal } from './src/components/QRScannerModal';
 import { SettingsModal } from './src/components/SettingsModal';
 import { DeckScreen } from './src/components/DeckScreen';
+import { DeckGrid, type KeyResult } from './src/components/DeckGrid';
+import { parseGrid } from './src/utils/grid';
 import { GuideCarousel } from './src/components/GuideCarousel';
-import { ThemeProvider, useTheme } from './src/utils/themeContext';
+import { ThemeProvider } from './src/utils/themeContext';
+import { AppText, Button, IconButton, Panel, StatusPill, type StatusTone } from './src/ui/primitives';
+import { colors } from './src/ui/tokens';
+
+// Keep the splash screen up until Geist has loaded, so text never flashes in the system font.
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+const RESULT_FLASH_MS = 1600;
+const DOCK_MODE_KEY = 'inflow_mobile_dock_mode_v1';
+const KEEP_AWAKE_TAG = 'inflow-deck';
 
 const DEFAULT_CONFIG: DeckConfig = {
   version: 1,
@@ -51,17 +45,7 @@ const DEFAULT_CONFIG: DeckConfig = {
       slots: Array.from({ length: 6 }).map((_, i) => ({
         id: `slot-ws-${i}`,
         type: 'empty',
-        label: 'Empty Slot',
-        icon: 'Plus',
-      })),
-    },
-    {
-      id: 'quick_actions',
-      title: 'Quick Actions',
-      slots: Array.from({ length: 6 }).map((_, i) => ({
-        id: `slot-act-${i}`,
-        type: 'empty',
-        label: 'Empty Slot',
+        label: '',
         icon: 'Plus',
       })),
     },
@@ -69,8 +53,40 @@ const DEFAULT_CONFIG: DeckConfig = {
   updatedAt: new Date().toISOString(),
 };
 
+const STATUS: Record<ConnectionState, { tone: StatusTone; pill: string; title: string; body: string }> = {
+  connected: {
+    tone: 'live',
+    pill: 'Connected',
+    title: 'Ready when you are',
+    body: 'Your deck is live. Keys run on your PC the moment you press them.',
+  },
+  connecting: {
+    tone: 'idle',
+    pill: 'Connecting…',
+    title: 'Connecting to your PC',
+    body: 'Looking for InFlow on your Wi-Fi network.',
+  },
+  unpaired: {
+    tone: 'warning',
+    pill: 'Pairing required',
+    title: 'Pair with your PC',
+    body: 'Your PC issued a new pairing code. Click “Pair phone” in InFlow on the PC and scan it again.',
+  },
+  disconnected: {
+    tone: 'offline',
+    pill: 'Offline',
+    title: 'PC not reachable',
+    body: 'Make sure InFlow is running on your PC and both devices are on the same Wi-Fi.',
+  },
+  error: {
+    tone: 'offline',
+    pill: 'Offline',
+    title: 'PC not reachable',
+    body: 'Make sure InFlow is running on your PC and both devices are on the same Wi-Fi.',
+  },
+};
+
 function MainApp() {
-  const { theme } = useTheme();
   const [deckConfig, setDeckConfig] = useState<DeckConfig>(DEFAULT_CONFIG);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
@@ -84,46 +100,66 @@ function MainApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDeckOpen, setIsDeckOpen] = useState(false);
   const [dockModeEnabled, setDockModeEnabled] = useState(true);
+  const [keyResults, setKeyResults] = useState<Record<string, KeyResult>>({});
 
-  // Keep screen awake for desk dock mode
-  if (dockModeEnabled) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useKeepAwake();
-  }
+  const flashResult = useCallback((slotId: string, success: boolean) => {
+    const at = Date.now();
+    setKeyResults((r) => ({ ...r, [slotId]: { success, at } }));
+    setTimeout(() => {
+      setKeyResults((r) => {
+        if (r[slotId]?.at !== at) return r;
+        const { [slotId]: _done, ...rest } = r;
+        return rest;
+      });
+    }, RESULT_FLASH_MS);
+    if (success) Haptics.success();
+    else Haptics.error();
+  }, []);
+
+  // Desk-dock mode: keep the screen on while the phone sits next to the monitor.
+  useEffect(() => {
+    if (!dockModeEnabled) return;
+    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+    return () => {
+      deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
+    };
+  }, [dockModeEnabled]);
 
   useEffect(() => {
-    // 1. Load saved config & cached deck
+    AsyncStorage.getItem(DOCK_MODE_KEY).then((saved) => {
+      if (saved !== null) setDockModeEnabled(saved === 'true');
+    });
+
     ConnectionService.loadConfig().then((cfg) => {
       setConnectionConfig(cfg);
       ConnectionService.connect();
     });
 
     ConnectionService.getCachedDeckConfig().then((cached) => {
-      if (cached && cached.pages) {
-        setDeckConfig(cached);
-      }
+      if (cached?.pages) setDeckConfig(cached);
     });
 
-    // 2. Register live listeners
-    const unlistenDeck = ConnectionService.onDeckUpdate((newConfig) => {
-      setDeckConfig(newConfig);
-    });
-
-    const unlistenActive = ConnectionService.onActiveStateChange((activeId) => {
-      setActiveWorkspaceId(activeId);
-    });
-
-    const unlistenConn = ConnectionService.onConnectionStateChange((state) => {
-      setConnectionState(state);
+    const unlistenDeck = ConnectionService.onDeckUpdate(setDeckConfig);
+    const unlistenActive = ConnectionService.onActiveStateChange(setActiveWorkspaceId);
+    const unlistenConn = ConnectionService.onConnectionStateChange(setConnectionState);
+    // The PC reports back once a key has finished running so the key can flash green or red.
+    const unlistenResult = ConnectionService.onLaunchResult((result) => {
+      if (result.slotId) flashResult(result.slotId, result.success);
     });
 
     return () => {
       unlistenDeck();
       unlistenActive();
       unlistenConn();
+      unlistenResult();
       ConnectionService.disconnect();
     };
-  }, []);
+  }, [flashResult]);
+
+  const handleToggleDockMode = (enabled: boolean) => {
+    setDockModeEnabled(enabled);
+    AsyncStorage.setItem(DOCK_MODE_KEY, String(enabled)).catch(() => {});
+  };
 
   const handleSaveConnectionConfig = async (newCfg: ConnectionConfig) => {
     setConnectionConfig(newCfg);
@@ -134,434 +170,263 @@ function MainApp() {
 
   const handleQRScanned = async (scannedData: string) => {
     const parsed = ConnectionService.parsePairingPayload(scannedData);
-    if (parsed) {
-      const updated: ConnectionConfig = {
-        host: parsed.host,
-        port: parsed.port,
-        autoConnect: true,
-      };
-      await handleSaveConnectionConfig(updated);
+    if (!parsed) {
+      Haptics.error();
+      return;
     }
+    await handleSaveConnectionConfig({ host: parsed.host, port: parsed.port, autoConnect: true, token: parsed.token });
   };
 
-  const handlePressSlot = async (slot: DeckSlot) => {
-    if (slot.type === 'empty' || !slot.targetId) return;
-
-    if (slot.type === 'workspace') {
-      await ConnectionService.triggerLaunch(slot.targetId);
-    } else if (slot.type === 'quick_action') {
-      const parentWsId = slot.targetWorkspaceId || slot.targetId;
-      await ConnectionService.triggerLaunch(parentWsId, slot.targetId);
-    }
+  const handleTriggerSlot = async (slot: DeckSlot, pageId: string) => {
+    const res = await ConnectionService.triggerKey(slot, pageId);
+    // Delivery failures never reach the PC, so flash them here; run results come back via LAUNCH_RESULT.
+    if (!res.success) flashResult(slot.id, false);
   };
 
   const isConnected = connectionState === 'connected';
+  const status = STATUS[connectionState];
+  const topPages = deckConfig.pages.filter((p) => !p.parentId);
+  const firstPage = topPages[0] ?? deckConfig.pages[0];
+  const { rows, cols } = parseGrid(deckConfig.gridDimension);
 
-  // If in Deck Mode (Forced Landscape View)
-  if (isDeckOpen) {
-    return (
-      <DeckScreen
-        deckConfig={deckConfig}
-        activeWorkspaceId={activeWorkspaceId}
-        isConnected={isConnected}
-        onPressSlot={handlePressSlot}
-        onCloseDeck={() => setIsDeckOpen(false)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-      />
-    );
-  }
-
-  // Home Screen (Portrait Mode)
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
-
-      {/* Top Header Bar */}
-      <View style={styles.topbar}>
-        {/* Brand */}
-        <View style={styles.brandContainer}>
-          <View style={styles.brandIconBox}>
-            <Zap size={16} color="#ef4444" />
-          </View>
-          <View>
-            <Text style={styles.brandTitle}>InFlow Companion</Text>
-            <Text style={styles.brandSubtitle}>Desktop Stream Deck</Text>
-          </View>
-        </View>
-
-        {/* Action Buttons */}
-        <View style={styles.actionButtons}>
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              setIsScannerOpen(true);
-            }}
-            style={styles.iconButton}
-          >
-            <QrCode size={17} color="#e4e4e7" />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              setIsSettingsOpen(true);
-            }}
-            style={styles.iconButton}
-          >
-            <Sliders size={17} color="#e4e4e7" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Connection Status Hero Card */}
-        <View style={styles.heroSection}>
-          <View
-            style={[
-              styles.connectionCard,
-              isConnected ? styles.connectionCardConnected : styles.connectionCardDisconnected,
-            ]}
-          >
-            <View style={styles.cardHeader}>
-              <View style={styles.statusIndicatorGroup}>
-                <View
-                  style={[
-                    styles.statusDotLarge,
-                    {
-                      backgroundColor:
-                        connectionState === 'connected'
-                          ? '#10b981'
-                          : connectionState === 'connecting'
-                          ? '#f59e0b'
-                          : '#ef4444',
-                    },
-                  ]}
-                />
-                <Text style={styles.connectionStatusTitle}>
-                  {connectionState === 'connected'
-                    ? 'CONNECTED TO PC'
-                    : connectionState === 'connecting'
-                    ? 'CONNECTING TO PC...'
-                    : 'NOT CONNECTED'}
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                onPress={() => ConnectionService.connect()}
-                style={styles.retryBtn}
-              >
-                {isConnected ? (
-                  <Wifi size={14} color="#34d399" />
-                ) : (
-                  <WifiOff size={14} color="#f87171" />
-                )}
-                <Text style={styles.retryBtnText}>
-                  {isConnected ? 'Active' : 'Reconnect'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.endpointText}>
-              Host Endpoint: <Text style={styles.hostHighlight}>{connectionConfig.host}:{connectionConfig.port}</Text>
-            </Text>
-
-            {/* Prominent Dedicated Open Deck Button */}
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-                setIsDeckOpen(true);
-              }}
-              activeOpacity={0.88}
-              style={[
-                styles.openDeckButton,
-                isConnected ? styles.openDeckButtonActive : styles.openDeckButtonDisabled,
-              ]}
-            >
-              <View style={styles.openDeckBtnContent}>
-                <View style={styles.openDeckIconCircle}>
-                  <Smartphone size={20} color="#ffffff" />
-                </View>
-                <View style={styles.openDeckTextCol}>
-                  <Text style={styles.openDeckTitle}>Open Stream Deck</Text>
-                  <Text style={styles.openDeckSub}>
-                    {isConnected
-                      ? 'Launch landscape console with instant sync'
-                      : 'Connect to desktop or preview deck layout'}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.launchIconBox}>
-                <Play size={16} color="#ffffff" fill="#ffffff" />
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Feature & Connection Guide Carousel */}
-        <GuideCarousel onScanPress={() => setIsScannerOpen(true)} />
-
-        {/* Quick Diagnostics & Info */}
-        <View style={styles.infoSection}>
-          <View style={styles.statsRow}>
-            <View style={styles.statBox}>
-              <Layers size={16} color="#818cf8" />
-              <Text style={styles.statNumber}>
-                {deckConfig.pages.length} Pages
-              </Text>
-              <Text style={styles.statLabel}>Configured Layouts</Text>
-            </View>
-
-            <View style={styles.statBox}>
-              <Sparkles size={16} color="#34d399" />
-              <Text style={styles.statNumber}>
-                {deckConfig.gridDimension} Grid
-              </Text>
-              <Text style={styles.statLabel}>Landscape Fit</Text>
-            </View>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Modals */}
-      <QRScannerModal
-        visible={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onScan={handleQRScanned}
-      />
-
+  const modals = (
+    <>
+      <QRScannerModal visible={isScannerOpen} onClose={() => setIsScannerOpen(false)} onScan={handleQRScanned} />
       <SettingsModal
         visible={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         config={connectionConfig}
         onSaveConfig={handleSaveConnectionConfig}
         dockModeEnabled={dockModeEnabled}
-        onToggleDockMode={setDockModeEnabled}
+        onToggleDockMode={handleToggleDockMode}
       />
+    </>
+  );
+
+  // Deck mode (forced landscape). Modals render here too so Settings works from the deck menu.
+  if (isDeckOpen) {
+    return (
+      <>
+        <DeckScreen
+          deckConfig={deckConfig}
+          activeWorkspaceId={activeWorkspaceId}
+          isConnected={isConnected}
+          results={keyResults}
+          onTriggerSlot={handleTriggerSlot}
+          onCloseDeck={() => setIsDeckOpen(false)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+        />
+        {modals}
+      </>
+    );
+  }
+
+  const openDeck = () => setIsDeckOpen(true);
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="light" />
+
+      <View style={styles.header}>
+        <View style={styles.brand}>
+          <View style={styles.logo}>
+            <Zap size={16} color="#ffffff" fill="#ffffff" />
+          </View>
+          <View>
+            <AppText variant="base" style={styles.brandName}>
+              InFlow
+            </AppText>
+            <AppText variant="micro" color={colors.ink3}>
+              Companion
+            </AppText>
+          </View>
+        </View>
+        <View style={styles.headerActions}>
+          <IconButton icon={QrCode} label="Scan pairing code" onPress={() => setIsScannerOpen(true)} />
+          <IconButton icon={Settings2} label="Settings" onPress={() => setIsSettingsOpen(true)} />
+        </View>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* Connection */}
+        <Panel style={styles.connection}>
+          <View style={styles.statusRow}>
+            <StatusPill tone={status.tone} label={status.pill} />
+            {isConnected && (
+              <AppText variant="mono" color={colors.ink3} numberOfLines={1} style={styles.host}>
+                {connectionConfig.host}:{connectionConfig.port}
+              </AppText>
+            )}
+          </View>
+          <View style={styles.connectionText}>
+            <AppText variant="title">{status.title}</AppText>
+            <AppText variant="ui" color={colors.ink2}>
+              {status.body}
+            </AppText>
+          </View>
+          <Button label="Open Stream Deck" icon={Play} iconFill variant="primary" size="lg" onPress={openDeck} />
+          {connectionState === 'unpaired' && (
+            <Button label="Scan pairing code" icon={QrCode} variant="secondary" onPress={() => setIsScannerOpen(true)} />
+          )}
+          {(connectionState === 'disconnected' || connectionState === 'error') && (
+            <View style={styles.buttonRow}>
+              <Button label="Retry" icon={RefreshCw} variant="secondary" style={styles.flex} onPress={() => ConnectionService.connect()} />
+              <Button label="Scan QR" icon={QrCode} variant="secondary" style={styles.flex} onPress={() => setIsScannerOpen(true)} />
+            </View>
+          )}
+        </Panel>
+
+        {/* Deck preview, drawn with the same key faces as the deck itself */}
+        <Panel style={styles.preview}>
+          <View style={styles.previewHeader}>
+            <View>
+              <AppText variant="eyebrow">Your deck</AppText>
+              <AppText variant="sm">{firstPage?.title || 'Deck'}</AppText>
+            </View>
+            <AppText variant="micro" color={colors.ink3} style={styles.previewMeta}>
+              {rows}×{cols} · {topPages.length} page{topPages.length === 1 ? '' : 's'}
+            </AppText>
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel="Open Stream Deck" onPress={openDeck} onPressIn={() => Haptics.tick()}>
+            <View style={styles.frame}>
+              <View style={{ aspectRatio: cols / rows }}>
+                <DeckGrid
+                  slots={firstPage?.slots ?? []}
+                  gridDimension={deckConfig.gridDimension}
+                  activeWorkspaceId={activeWorkspaceId}
+                  onPressSlot={() => {}}
+                  gap={8}
+                  preview
+                />
+              </View>
+            </View>
+          </Pressable>
+          <AppText variant="micro" color={colors.ink3}>
+            {isConnected ? 'Live from your PC. Edits made there appear here instantly.' : 'Last synced layout. Reconnect to get the latest.'}
+          </AppText>
+        </Panel>
+
+        <GuideCarousel onScanPress={() => setIsScannerOpen(true)} />
+      </ScrollView>
+
+      {modals}
     </SafeAreaView>
   );
 }
 
 export default function App() {
+  const [fontsLoaded, fontError] = useFonts({
+    Geist_400Regular,
+    Geist_500Medium,
+    Geist_600SemiBold,
+    Geist_700Bold,
+    GeistMono_500Medium,
+  });
+
+  useEffect(() => {
+    Haptics.load();
+  }, []);
+
+  useEffect(() => {
+    if (fontsLoaded || fontError) SplashScreen.hideAsync().catch(() => {});
+  }, [fontsLoaded, fontError]);
+
+  if (!fontsLoaded && !fontError) return null;
+
   return (
-    <ThemeProvider>
-      <MainApp />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <MainApp />
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0a0a0c',
+    backgroundColor: colors.canvas,
   },
-  topbar: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    height: 64,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-    backgroundColor: '#101014',
+    borderBottomColor: colors.line,
+    backgroundColor: colors.surface,
   },
-  brandContainer: {
+  brand: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 11,
   },
-  brandIconBox: {
+  logo: {
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.35)',
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  brandTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.2,
-  },
-  brandSubtitle: {
-    fontSize: 10,
-    color: '#71717a',
-    marginTop: 1,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scrollContent: {
-    paddingBottom: 24,
-  },
-  heroSection: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  connectionCard: {
-    borderRadius: 22,
-    borderWidth: 1,
-    padding: 18,
-    backgroundColor: '#121216',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
+    shadowColor: colors.brand,
+    shadowOpacity: 0.55,
     shadowRadius: 10,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
   },
-  connectionCardConnected: {
-    borderColor: 'rgba(16, 185, 129, 0.35)',
-    backgroundColor: 'rgba(16, 185, 129, 0.04)',
+  brandName: {
+    lineHeight: 20,
   },
-  connectionCardDisconnected: {
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  cardHeader: {
+  headerActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  statusIndicatorGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
   },
-  statusDotLarge: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  scroll: {
+    padding: 16,
+    gap: 16,
+    paddingBottom: 32,
   },
-  connectionStatusTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#a1a1aa',
-    letterSpacing: 0.6,
+  connection: {
+    padding: 16,
+    gap: 14,
   },
-  retryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  retryBtnText: {
-    fontSize: 10.5,
-    color: '#e4e4e7',
-    fontWeight: '600',
-  },
-  endpointText: {
-    fontSize: 12,
-    color: '#71717a',
-    marginBottom: 16,
-  },
-  hostHighlight: {
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  openDeckButton: {
+  statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 14,
-    borderRadius: 16,
+    gap: 10,
   },
-  openDeckButtonActive: {
-    backgroundColor: '#ef4444',
-    shadowColor: '#ef4444',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.45,
-    shadowRadius: 8,
-    elevation: 6,
+  host: {
+    flexShrink: 1,
   },
-  openDeckButtonDisabled: {
-    backgroundColor: '#27272a',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+  connectionText: {
+    gap: 4,
   },
-  openDeckBtnContent: {
+  buttonRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    gap: 10,
+  },
+  flex: {
     flex: 1,
   },
-  openDeckIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  openDeckTextCol: {
-    flex: 1,
-  },
-  openDeckTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: -0.2,
-  },
-  openDeckSub: {
-    fontSize: 10.5,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 2,
-  },
-  launchIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 8,
-  },
-  infoSection: {
-    paddingHorizontal: 16,
-    marginTop: 8,
-  },
-  statsRow: {
-    flexDirection: 'row',
+  preview: {
+    padding: 16,
     gap: 12,
   },
-  statBox: {
-    flex: 1,
-    backgroundColor: '#121216',
-    borderRadius: 16,
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  previewMeta: {
+    fontVariant: ['tabular-nums'],
+  },
+  frame: {
+    padding: 12,
+    borderRadius: 20,
+    backgroundColor: '#0b0b0d',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statNumber: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginTop: 6,
-  },
-  statLabel: {
-    fontSize: 10,
-    color: '#71717a',
-    marginTop: 2,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
 });

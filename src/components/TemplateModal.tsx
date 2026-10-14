@@ -1,17 +1,8 @@
-import React from 'react';
-import {
-  X,
-  Sparkles,
-  Plus,
-  ArrowRight,
-  Globe,
-  Folder,
-  FileText,
-  Terminal,
-} from 'lucide-react';
+import React, { useEffect } from 'react';
+import { Plus, Sparkles, X } from 'lucide-react';
 import type { Workspace } from '../types/workspace';
 import { PRESET_TEMPLATES } from '../data/defaults';
-import { renderWorkspaceIcon, getAccentConfig } from '../utils/theme';
+import { accentStyle, describeAction, getActionTypeMeta, renderWorkspaceIcon } from '../utils/theme';
 
 interface TemplateModalProps {
   isOpen: boolean;
@@ -19,102 +10,68 @@ interface TemplateModalProps {
   onSelectTemplate: (template: Workspace) => void;
 }
 
-export const TemplateModal: React.FC<TemplateModalProps> = ({
-  isOpen,
-  onClose,
-  onSelectTemplate,
-}) => {
+export const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSelectTemplate }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-md animate-fade-in overflow-y-auto font-sans">
-      <div className="relative w-full max-w-2xl bg-[#1e1e20]/80 backdrop-blur-2xl border border-white/10 rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.7)] overflow-hidden my-8 flex flex-col text-neutral-200">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] bg-white/[0.02]">
-          <div className="flex items-center space-x-2">
-            <div className="p-1.5 bg-red-500/20 text-red-400 rounded-md border border-red-500/30">
-              <Sparkles className="w-3.5 h-3.5" />
-            </div>
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal max-w-3xl" role="dialog" aria-modal="true" aria-labelledby="tpl-title">
+        <header className="flex items-center justify-between px-5 h-14 border-b border-line flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="w-3.5 h-3.5 text-brand-ink" />
             <div>
-              <h2 className="text-xs font-semibold text-white tracking-tight">Workspace Templates</h2>
-              <p className="text-[10px] text-neutral-400">
-                Choose a pre-configured workflow to get up and running in seconds.
-              </p>
+              <h2 id="tpl-title" className="text-base font-semibold leading-tight">Templates</h2>
+              <p className="text-micro text-ink-3">Start from a ready-made workspace and adjust it to your setup.</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            type="button"
-            className="p-1 text-neutral-400 hover:text-white rounded-md hover:bg-white/10 transition-colors"
-          >
+          <button type="button" onClick={onClose} className="btn btn-ghost btn-icon" aria-label="Close">
             <X className="w-3.5 h-3.5" />
           </button>
-        </div>
+        </header>
 
-        {/* Template Grid */}
-        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[60vh] overflow-y-auto custom-scrollbar">
-          {PRESET_TEMPLATES.map((tpl) => {
-            const accent = getAccentConfig(tpl.accentColor);
-            return (
-              <div
-                key={tpl.id}
-                className="group relative rounded-lg bg-black/40 border border-white/5 hover:border-white/20 p-3 flex flex-col justify-between transition-all duration-150"
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex items-center space-x-2">
-                      <div className={`p-1.5 rounded-md border border-white/10 ${accent.bgGlow}`}>
-                        {renderWorkspaceIcon(tpl.icon, 'w-3.5 h-3.5')}
-                      </div>
-                      <div>
-                        <h3 className="text-xs font-medium text-white group-hover:text-red-400 transition-colors">
-                          {tpl.name}
-                        </h3>
-                        <span className="text-[9px] text-neutral-400 font-mono">
-                          {tpl.actions.length} curated actions
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] text-neutral-400 line-clamp-2 leading-normal mb-2.5">
-                    {tpl.description}
-                  </p>
-
-                  {/* Actions Preview in Template */}
-                  <div className="space-y-1 mb-2.5">
-                    {tpl.actions.map((act, idx) => (
-                      <div
-                        key={idx}
-                        className="px-2 py-1 bg-white/5 border border-white/5 rounded-md flex items-center justify-between text-[10px]"
-                      >
-                        <div className="flex items-center space-x-1.5 truncate">
-                          {act.type === 'url' && <Globe className="w-3 h-3 text-sky-400 shrink-0" />}
-                          {act.type === 'folder' && <Folder className="w-3 h-3 text-amber-400 shrink-0" />}
-                          {act.type === 'file' && <FileText className="w-3 h-3 text-emerald-400 shrink-0" />}
-                          {act.type === 'app' && <Terminal className="w-3 h-3 text-purple-400 shrink-0" />}
-                          <span className="text-neutral-300 truncate font-mono text-[10px]">{act.label}</span>
-                        </div>
-                        <span className="text-[8px] text-neutral-400 font-mono uppercase shrink-0 ml-1">
-                          {act.type}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+          {PRESET_TEMPLATES.map((tpl) => (
+            <article
+              key={tpl.id}
+              className="group flex flex-col rounded-2xl border border-line bg-white/[0.02] hover:border-line-strong hover:bg-white/[0.035] p-4 transition-colors"
+              style={accentStyle(tpl.accentColor)}
+            >
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-white/[0.08] text-[color-mix(in_oklab,var(--accent)_75%,white)] bg-[color-mix(in_oklab,var(--accent)_16%,transparent)]">
+                  {renderWorkspaceIcon(tpl.icon, 'w-4 h-4')}
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => onSelectTemplate(tpl)}
-                  className="w-full mt-1 py-1 px-2.5 rounded-md text-xs font-medium text-white bg-red-500 hover:bg-red-600 transition-all flex items-center justify-center space-x-1 shadow-sm active:scale-[0.98]"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Use Template</span>
-                  <ArrowRight className="w-3 h-3 opacity-70 group-hover:translate-x-0.5 transition-transform" />
-                </button>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold">{tpl.name}</h3>
+                  <p className="text-ui text-ink-2 line-clamp-2">{tpl.description}</p>
+                </div>
               </div>
-            );
-          })}
+
+              <ol className="flex-1 space-y-1 mb-3">
+                {tpl.actions.map((act) => {
+                  const meta = getActionTypeMeta(act.type);
+                  return (
+                    <li key={act.id} className="flex items-center gap-2 text-ui">
+                      <meta.icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: meta.hex }} />
+                      <span className="truncate">{act.label}</span>
+                      <span className="ml-auto text-micro text-ink-3 font-mono truncate max-w-[45%]">{describeAction(act)}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+
+              <button type="button" onClick={() => onSelectTemplate(tpl)} className="btn btn-secondary w-full group-hover:border-white/20">
+                <Plus className="w-3.5 h-3.5" />
+                Add to my workspaces
+              </button>
+            </article>
+          ))}
         </div>
       </div>
     </div>

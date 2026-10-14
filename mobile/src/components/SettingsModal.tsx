@@ -1,18 +1,11 @@
-import React, { useState } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  Modal,
-  TouchableOpacity,
-  TextInput,
-  Switch,
-  ActivityIndicator,
-} from 'react-native';
-import { Sliders, X, Check, Wifi, ShieldCheck, Zap } from 'lucide-react-native';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, Switch, TextInput, View, type TextInputProps } from 'react-native';
+import { CheckCircle2, Info, Settings2, Wifi, XCircle } from 'lucide-react-native';
 import type { ConnectionConfig } from '../types/deck';
-import { ConnectionService } from '../services/connection';
-import * as Haptics from 'expo-haptics';
+import { ConnectionService, normalizeToken } from '../services/connection';
+import { HAPTIC_OPTIONS, Haptics, useHapticLevel } from '../services/haptics';
+import { AppText, Button, Segmented, Sheet } from '../ui/primitives';
+import { colors, fonts, radius, withAlpha } from '../ui/tokens';
 
 interface SettingsModalProps {
   visible: boolean;
@@ -33,334 +26,215 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [host, setHost] = useState(config.host);
   const [port, setPort] = useState(String(config.port));
+  const [pairingCode, setPairingCode] = useState(config.token || '');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; msg: string } | null>(null);
+  const [hapticLevel, setHapticLevel] = useHapticLevel();
 
-  if (!visible) return null;
+  // Re-read the saved config each time the sheet opens (it may have changed via a QR scan).
+  useEffect(() => {
+    if (!visible) return;
+    setHost(config.host);
+    setPort(String(config.port));
+    setPairingCode(config.token || '');
+    setTestResult(null);
+  }, [visible, config]);
 
   const handleTestConnection = async () => {
     setTesting(true);
     setTestResult(null);
-    const p = parseInt(port, 10) || 8080;
-    const result = await ConnectionService.testConnection(host.trim(), p);
+    const result = await ConnectionService.testConnection(host.trim(), parseInt(port, 10) || 8080, normalizeToken(pairingCode));
     setTesting(false);
-
     if (result.success) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setTestResult({
-        success: true,
-        msg: `Connected to PC! (Server v${result.status?.serverVersion || '1.0.0'})`,
-      });
+      Haptics.emphasis();
+      setTestResult({ success: true, msg: `Paired with InFlow ${result.status?.server_version || '1.x'} on your PC` });
     } else {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      setTestResult({
-        success: false,
-        msg: result.error || 'Could not reach PC server.',
-      });
+      Haptics.error();
+      setTestResult({ success: false, msg: result.error || 'Could not reach your PC.' });
     }
   };
 
   const handleSave = () => {
-    const p = parseInt(port, 10) || 8080;
-    const updated: ConnectionConfig = {
+    onSaveConfig({
       host: host.trim() || '127.0.0.1',
-      port: p,
+      port: parseInt(port, 10) || 8080,
       autoConnect: true,
-    };
-    onSaveConfig(updated);
+      token: normalizeToken(pairingCode),
+    });
     onClose();
   };
 
   return (
-    <Modal
+    <Sheet
       visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={onClose}
+      onClose={onClose}
+      title="Settings"
+      icon={Settings2}
+      animation="slide"
+      footer={
+        <>
+          <Button label="Cancel" variant="ghost" size="sm" onPress={onClose} />
+          <Button label="Save & connect" variant="primary" size="sm" onPress={handleSave} />
+        </>
+      }
     >
-      <View style={styles.overlay}>
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <Sliders size={18} color="#ef4444" />
-              <Text style={styles.title}>Companion Settings</Text>
-            </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <X size={20} color="#a1a1aa" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Body */}
-          <View style={styles.body}>
-            {/* Host PC IP Input */}
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>PC IP ADDRESS / HOST</Text>
-              <TextInput
-                value={host}
-                onChangeText={setHost}
-                placeholder="e.g. 192.168.1.15"
-                placeholderTextColor="#52525b"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.input}
-              />
-            </View>
-
-            {/* Port Input */}
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>PORT (DEFAULT: 8080)</Text>
-              <TextInput
-                value={port}
-                onChangeText={setPort}
-                placeholder="8080"
-                placeholderTextColor="#52525b"
-                keyboardType="numeric"
-                style={styles.input}
-              />
-            </View>
-
-            {/* Test Connection Button */}
-            <TouchableOpacity
-              onPress={handleTestConnection}
-              disabled={testing}
-              style={styles.testBtn}
-            >
-              {testing ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Wifi size={14} color="#fafafa" />
-              )}
-              <Text style={styles.testBtnText}>
-                {testing ? 'Testing...' : 'Test Connection to PC'}
-              </Text>
-            </TouchableOpacity>
-
-            {/* Test Result Message */}
-            {testResult && (
-              <View
-                style={[
-                  styles.resultBox,
-                  testResult.success ? styles.resultSuccess : styles.resultError,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.resultText,
-                    testResult.success ? styles.textSuccess : styles.textError,
-                  ]}
-                >
-                  {testResult.msg}
-                </Text>
-              </View>
-            )}
-
-            {/* Desk Dock Mode Toggle */}
-            <View style={styles.toggleRow}>
-              <View style={styles.toggleTextCol}>
-                <Text style={styles.toggleTitle}>Desk-Dock Mode (Keep Awake)</Text>
-                <Text style={styles.toggleDesc}>
-                  Prevents screen dimming/sleeping when mounted on phone stand.
-                </Text>
-              </View>
-              <Switch
-                value={dockModeEnabled}
-                onValueChange={onToggleDockMode}
-                thumbColor={dockModeEnabled ? '#ef4444' : '#71717a'}
-                trackColor={{ false: '#27272a', true: 'rgba(239, 68, 68, 0.4)' }}
-              />
-            </View>
-
-            {/* Information Callout */}
-            <View style={styles.infoBox}>
-              <ShieldCheck size={14} color="#34d399" />
-              <Text style={styles.infoText}>
-                Deck buttons, labels & colors are managed dynamically from your PC InFlow "Mobile Deck" menu.
-              </Text>
-            </View>
-          </View>
-
-          {/* Footer */}
-          <View style={styles.footer}>
-            <TouchableOpacity onPress={onClose} style={styles.cancelBtn}>
-              <Text style={styles.cancelBtnText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleSave} style={styles.saveBtn}>
-              <Text style={styles.saveBtnText}>Save & Connect</Text>
-            </TouchableOpacity>
-          </View>
+      <View style={styles.group}>
+        <AppText variant="eyebrow">Connection</AppText>
+        <View style={styles.row}>
+          <Field label="PC address" value={host} onChangeText={setHost} placeholder="192.168.1.15" style={styles.flex} keyboardType="numbers-and-punctuation" />
+          <Field label="Port" value={port} onChangeText={setPort} placeholder="8080" keyboardType="number-pad" style={styles.portField} />
         </View>
+        <Field
+          label="Pairing code"
+          value={pairingCode}
+          onChangeText={setPairingCode}
+          placeholder="ABCD-EFGH"
+          autoCapitalize="characters"
+          maxLength={9}
+          mono
+        />
+        <Button
+          label={testing ? 'Testing…' : 'Test connection'}
+          icon={testing ? undefined : Wifi}
+          variant="secondary"
+          disabled={testing}
+          onPress={handleTestConnection}
+        />
+        {testResult && (
+          <View
+            style={[
+              styles.result,
+              {
+                backgroundColor: withAlpha(testResult.success ? colors.success : colors.danger, 0.1),
+                borderColor: withAlpha(testResult.success ? colors.success : colors.danger, 0.3),
+              },
+            ]}
+          >
+            {testResult.success ? <CheckCircle2 size={15} color={colors.success} /> : <XCircle size={15} color={colors.danger} />}
+            <AppText variant="ui" color={testResult.success ? '#a7f3d0' : '#fecaca'} style={styles.flex}>
+              {testResult.msg}
+            </AppText>
+          </View>
+        )}
       </View>
-    </Modal>
+
+      <View style={styles.group}>
+        <AppText variant="eyebrow">Haptic feedback</AppText>
+        <Segmented value={hapticLevel} options={HAPTIC_OPTIONS} onChange={setHapticLevel} />
+        <AppText variant="micro" color={colors.ink3}>
+          {hapticLevel === 'crisp'
+            ? 'Short, precise clicks from the system haptic engine. On Android this follows your “Touch feedback” setting.'
+            : hapticLevel === 'strong'
+            ? 'Heavier taps using the vibration motor, plus a confirmation when the PC finishes.'
+            : 'No vibration when pressing keys.'}
+        </AppText>
+      </View>
+
+      <View style={styles.toggleRow}>
+        <View style={styles.flex}>
+          <AppText variant="sm">Keep screen awake</AppText>
+          <AppText variant="micro" color={colors.ink3}>
+            For a phone docked next to your monitor.
+          </AppText>
+        </View>
+        <Switch
+          value={dockModeEnabled}
+          onValueChange={(v) => {
+            Haptics.toggle(v);
+            onToggleDockMode(v);
+          }}
+          thumbColor={dockModeEnabled ? '#ffffff' : '#a1a1aa'}
+          trackColor={{ false: colors.field, true: colors.brand }}
+          ios_backgroundColor={colors.field}
+        />
+      </View>
+
+      <View style={styles.info}>
+        <Info size={14} color={colors.ink3} />
+        <AppText variant="micro" color={colors.ink3} style={styles.flex}>
+          Keys, folders and colors are designed in InFlow on your PC and sync here instantly. Scanning the QR code fills in
+          the connection fields for you.
+        </AppText>
+      </View>
+    </Sheet>
+  );
+};
+
+const Field: React.FC<TextInputProps & { label: string; mono?: boolean }> = ({ label, mono, style, ...rest }) => {
+  const [focused, setFocused] = useState(false);
+  return (
+    <View style={[styles.field, style]}>
+      <AppText variant="micro" color={colors.ink3}>
+        {label}
+      </AppText>
+      <TextInput
+        placeholderTextColor={colors.ink3}
+        autoCorrect={false}
+        autoCapitalize="none"
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={[
+          styles.input,
+          mono && styles.mono,
+          { borderColor: focused ? withAlpha(colors.brand, 0.6) : colors.line },
+        ]}
+        {...rest}
+      />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
+  group: {
+    gap: 10,
   },
-  container: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: '#161618',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    overflow: 'hidden',
-  },
-  header: {
+  row: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 10,
   },
-  headerLeft: {
+  flex: {
+    flex: 1,
+  },
+  portField: {
+    width: 88,
+  },
+  field: {
+    gap: 6,
+  },
+  input: {
+    height: 44,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    backgroundColor: colors.field,
+    color: colors.ink,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+  },
+  mono: {
+    fontFamily: fonts.mono,
+    letterSpacing: 2,
+  },
+  result: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  title: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  closeBtn: {
-    padding: 4,
-  },
-  body: {
-    padding: 18,
-    gap: 14,
-  },
-  formGroup: {
-    gap: 6,
-  },
-  label: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: '#71717a',
-    letterSpacing: 0.5,
-  },
-  input: {
-    backgroundColor: '#0d0d0f',
+    padding: 10,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    color: '#ffffff',
-    fontSize: 13,
-  },
-  testBtn: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    borderRadius: 10,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  testBtnText: {
-    color: '#fafafa',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  resultBox: {
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  resultSuccess: {
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  resultError: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-  },
-  resultText: {
-    fontSize: 11,
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  textSuccess: {
-    color: '#34d399',
-  },
-  textError: {
-    color: '#f87171',
   },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
+    gap: 12,
   },
-  toggleTextCol: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  toggleTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  toggleDesc: {
-    fontSize: 10,
-    color: '#71717a',
-    marginTop: 2,
-  },
-  infoBox: {
+  info: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    padding: 12,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    padding: 10,
-    borderRadius: 10,
-  },
-  infoText: {
-    flex: 1,
-    fontSize: 10.5,
-    color: '#a1a1aa',
-    lineHeight: 14,
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-    padding: 14,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
-    backgroundColor: '#121214',
-  },
-  cancelBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  cancelBtnText: {
-    color: '#a1a1aa',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  saveBtn: {
-    backgroundColor: '#ef4444',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  saveBtnText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
+    borderColor: colors.line,
+    backgroundColor: 'rgba(0,0,0,0.2)',
   },
 });

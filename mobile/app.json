@@ -6,21 +6,23 @@
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0d0d0f",
+    "backgroundColor": "#0c0c0e",
     "plugins": [
       [
         "expo-camera",
         {
           "cameraPermission": "Allow InFlow to scan the desktop QR code for pairing."
         }
-      ]
+      ],
+      "expo-font",
+      "expo-splash-screen"
     ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0d0d0f",
+        "backgroundColor": "#0c0c0e",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "permissions": [

@@ -1,23 +1,43 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { DeckConfig, ConnectionConfig, ConnectionState, ServerStatus } from '../types/deck';
+import type {
+  DeckConfig,
+  DeckSlot,
+  ConnectionConfig,
+  ConnectionState,
+  LaunchResult,
+  ServerStatus,
+} from '../types/deck';
 
 const HOST_STORAGE_KEY = 'inflow_mobile_host_v1';
 const DECK_CACHE_KEY = 'inflow_mobile_deck_cache_v1';
 
+const RECONNECT_MS = 4000;
+// When the PC rejects our token there is no point retrying quickly; the user has to re-pair.
+const UNPAIRED_RETRY_MS = 15000;
+const TRIGGER_TIMEOUT_MS = 2500;
+
 export type DeckUpdateListener = (config: DeckConfig) => void;
 export type ActiveStateListener = (activeWorkspaceId: string | null) => void;
 export type ConnectionStateListener = (state: ConnectionState) => void;
+export type LaunchResultListener = (result: LaunchResult) => void;
+
+/** Accepts "abcd-efgh", "ABCD EFGH" etc. and returns the 8-character token. */
+export function normalizeToken(raw: string | undefined | null): string | undefined {
+  const clean = (raw || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+  return clean || undefined;
+}
 
 export class ConnectionService {
   private static ws: WebSocket | null = null;
   private static config: ConnectionConfig = { host: '127.0.0.1', port: 8080, autoConnect: true };
   private static connectionState: ConnectionState = 'disconnected';
-  private static reconnectTimer: any = null;
-  private static pingInterval: any = null;
+  private static reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private static pingInterval: ReturnType<typeof setInterval> | null = null;
 
   private static deckListeners: Set<DeckUpdateListener> = new Set();
   private static activeStateListeners: Set<ActiveStateListener> = new Set();
   private static connectionStateListeners: Set<ConnectionStateListener> = new Set();
+  private static launchResultListeners: Set<LaunchResultListener> = new Set();
 
   /**
    * Load saved connection settings from AsyncStorage
@@ -46,35 +66,41 @@ export class ConnectionService {
     }
   }
 
-  /**
-   * Parse URI or QR payload (e.g. inflow://192.168.1.10:8080 or JSON)
-   */
-  static parsePairingPayload(payload: string): { host: string; port: number } | null {
-    try {
-      // 1. Check if payload is custom scheme: inflow://192.168.1.10:8080
-      if (payload.startsWith('inflow://')) {
-        const clean = payload.replace('inflow://', '').trim();
-        const parts = clean.split(':');
-        const host = parts[0];
-        const port = parts[1] ? parseInt(parts[1], 10) : 8080;
-        return { host, port };
-      }
+  private static baseUrl(host = this.config.host, port = this.config.port): string {
+    return `http://${host}:${port}`;
+  }
 
-      // 2. Check if payload is http://192.168.1.10:8080
-      if (payload.startsWith('http://') || payload.startsWith('https://')) {
-        const url = new URL(payload);
+  private static authHeaders(token = this.config.token): Record<string, string> {
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  /**
+   * Parse a pairing QR payload. Supports the desktop's JSON payload
+   * ({ host, port, token }) plus inflow://host:port?token=… and http:// URLs.
+   */
+  static parsePairingPayload(payload: string): { host: string; port: number; token?: string } | null {
+    const text = payload.trim();
+    try {
+      // React Native's URL polyfill lacks hostname/searchParams, so parse by hand.
+      const url = text.match(/^(?:inflow|https?):\/\/([^/:?#]+)(?::(\d+))?[^?#]*(?:\?([^#]*))?/i);
+      if (url) {
+        const tokenParam = (url[3] || '')
+          .split('&')
+          .map((pair) => pair.split('='))
+          .find(([key]) => key === 'token')?.[1];
         return {
-          host: url.hostname,
-          port: url.port ? parseInt(url.port, 10) : 8080,
+          host: url[1],
+          port: url[2] ? parseInt(url[2], 10) : 8080,
+          token: normalizeToken(tokenParam ? decodeURIComponent(tokenParam) : undefined),
         };
       }
 
-      // 3. Check if payload is JSON: { "host": "...", "port": 8080 }
-      const parsed = JSON.parse(payload);
+      const parsed = JSON.parse(text);
       if (parsed && (parsed.host || parsed.ip)) {
         return {
           host: parsed.host || parsed.ip,
           port: parsed.port ? parseInt(parsed.port, 10) : 8080,
+          token: normalizeToken(parsed.token),
         };
       }
     } catch (e) {
@@ -84,66 +110,86 @@ export class ConnectionService {
   }
 
   /**
-   * Connect to the desktop InFlow Axum server (WebSocket + REST sync)
+   * Connect to the desktop InFlow server (WebSocket for live sync, REST as fallback)
    */
   static connect(): void {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
 
     this.setConnectionState('connecting');
-    const wsUrl = `ws://${this.config.host}:${this.config.port}/ws`;
+    const token = this.config.token ? `?token=${encodeURIComponent(this.config.token)}` : '';
+    const wsUrl = `ws://${this.config.host}:${this.config.port}/ws${token}`;
+    let opened = false;
 
     try {
-      this.ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(wsUrl);
+      this.ws = ws;
 
-      this.ws.onopen = () => {
-        console.log(`[InFlow Mobile] Connected to PC at ${this.config.host}:${this.config.port}`);
+      ws.onopen = () => {
+        opened = true;
         this.setConnectionState('connected');
-        this.fetchDeckConfigRest(); // Initial fetch via REST to guarantee latest layout
+        this.fetchDeckConfigRest();
         this.startHeartbeat();
       };
 
-      this.ws.onmessage = (event) => {
+      ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.type === 'DECK_CONFIG_UPDATE') {
-            if (msg.payload && msg.payload.pages) {
-              this.notifyDeckUpdate(msg.payload);
-              this.cacheDeckConfig(msg.payload);
-            }
-          } else if (msg.type === 'CLIENT_CONNECTED') {
-            if (msg.payload?.deckConfig && msg.payload.deckConfig.pages) {
-              this.notifyDeckUpdate(msg.payload.deckConfig);
-              this.cacheDeckConfig(msg.payload.deckConfig);
-            }
-            if (msg.payload?.activeWorkspaceId !== undefined) {
-              this.notifyActiveState(msg.payload.activeWorkspaceId);
-            }
-          } else if (msg.type === 'ACTIVE_WORKSPACE_CHANGE') {
-            const activeId = msg.payload?.activeWorkspaceId || null;
-            this.notifyActiveState(activeId);
+          switch (msg.type) {
+            case 'DECK_CONFIG_UPDATE':
+              if (msg.payload?.pages) {
+                this.notifyDeckUpdate(msg.payload);
+                this.cacheDeckConfig(msg.payload);
+              }
+              break;
+            case 'CLIENT_CONNECTED':
+              if (msg.payload?.deckConfig?.pages) {
+                this.notifyDeckUpdate(msg.payload.deckConfig);
+                this.cacheDeckConfig(msg.payload.deckConfig);
+              }
+              if (msg.payload?.activeWorkspaceId !== undefined) {
+                this.notifyActiveState(msg.payload.activeWorkspaceId);
+              }
+              break;
+            case 'ACTIVE_WORKSPACE_CHANGE':
+              this.notifyActiveState(msg.payload?.activeWorkspaceId || null);
+              break;
+            case 'LAUNCH_RESULT':
+              this.launchResultListeners.forEach((fn) => fn(msg.payload));
+              break;
+            case 'PAIRING_REVOKED':
+              // The PC issued a new pairing code; the server closes this socket right after.
+              this.setConnectionState('unpaired');
+              break;
           }
         } catch (err) {
           console.error('[InFlow Mobile] Error parsing WebSocket message:', err);
         }
       };
 
-      this.ws.onerror = () => {
-        // Suppress verbose native event dumps; just update state
-        if (this.connectionState !== 'error') {
+      ws.onerror = () => {
+        if (this.connectionState !== 'error' && this.connectionState !== 'unpaired') {
           this.setConnectionState('error');
         }
       };
 
-      this.ws.onclose = () => {
-        this.setConnectionState('disconnected');
+      ws.onclose = async () => {
+        if (this.ws !== ws) return;
+        this.ws = null;
         this.stopHeartbeat();
-        this.scheduleReconnect();
+        // A socket that never opened may have been refused for a bad token; ask the status endpoint.
+        const unpaired = this.connectionState === 'unpaired' || (!opened && (await this.isRejectingToken()));
+        this.setConnectionState(unpaired ? 'unpaired' : 'disconnected');
+        this.scheduleReconnect(unpaired ? UNPAIRED_RETRY_MS : RECONNECT_MS);
       };
     } catch {
       this.setConnectionState('error');
-      this.scheduleReconnect();
+      this.scheduleReconnect(RECONNECT_MS);
     }
   }
 
@@ -154,24 +200,28 @@ export class ConnectionService {
     }
     this.stopHeartbeat();
     if (this.ws) {
-      this.ws.onopen = null;
-      this.ws.onmessage = null;
-      this.ws.onerror = null;
-      this.ws.onclose = null;
-      this.ws.close();
+      const ws = this.ws;
       this.ws = null;
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
+      ws.onclose = null;
+      ws.close();
     }
     this.setConnectionState('disconnected');
   }
 
-  private static scheduleReconnect(): void {
+  private static async isRejectingToken(): Promise<boolean> {
+    const res = await this.testConnection(this.config.host, this.config.port, this.config.token);
+    return res.reachable && !res.authorized;
+  }
+
+  private static scheduleReconnect(delay: number): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {
-      if (this.connectionState !== 'connected') {
-        console.log('[InFlow Mobile] Auto-reconnecting...');
-        this.connect();
-      }
-    }, 4000);
+      this.reconnectTimer = null;
+      if (this.connectionState !== 'connected') this.connect();
+    }, delay);
   }
 
   private static startHeartbeat(): void {
@@ -185,42 +235,45 @@ export class ConnectionService {
 
   private static stopHeartbeat(): void {
     if (this.pingInterval) clearInterval(this.pingInterval);
+    this.pingInterval = null;
   }
 
   /**
-   * Trigger launch on PC via WebSocket with HTTP REST fallback
+   * Ask the PC to run a key. The PC looks the key up by slotId in its own deck,
+   * so the phone never needs to know what the key actually does.
    */
-  static async triggerLaunch(workspaceId: string, actionId?: string): Promise<{ success: boolean; error?: string }> {
-    // 1. If WebSocket is active, send over WS
+  static async triggerKey(slot: DeckSlot, pageId: string): Promise<{ success: boolean; error?: string }> {
+    const workspaceId = slot.type === 'quick_action' ? slot.targetWorkspaceId : slot.type === 'workspace' ? slot.targetId : undefined;
+    const actionId = slot.type === 'quick_action' ? slot.targetId : undefined;
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(
         JSON.stringify({
           type: 'TRIGGER_LAUNCH',
-          payload: { workspaceId, actionId },
+          payload: { slotId: slot.id, pageId, workspaceId, actionId },
         })
       );
       return { success: true };
     }
 
-    // 2. Fallback to HTTP REST endpoint
+    // Bounded so a key on an offline PC fails fast instead of hanging until the OS gives up.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TRIGGER_TIMEOUT_MS);
     try {
-      const res = await fetch(`http://${this.config.host}:${this.config.port}/api/launch`, {
+      const res = await fetch(`${this.baseUrl()}/api/launch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspace_id: workspaceId,
-          action_id: actionId,
-        }),
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+        body: JSON.stringify({ slot_id: slot.id, page_id: pageId, workspace_id: workspaceId, action_id: actionId }),
+        signal: controller.signal,
       });
-
-      if (res.ok) {
-        return { success: true };
-      } else {
-        const data = await res.json().catch(() => ({}));
-        return { success: false, error: data.error || `HTTP error ${res.status}` };
-      }
+      if (res.ok) return { success: true };
+      if (res.status === 401) this.setConnectionState('unpaired');
+      const data = await res.json().catch(() => ({}));
+      return { success: false, error: data.error || `HTTP error ${res.status}` };
     } catch (e: any) {
-      return { success: false, error: e?.message || 'Failed to reach PC server' };
+      return { success: false, error: e?.name === 'AbortError' ? 'PC did not respond' : e?.message || 'Failed to reach PC server' };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -229,7 +282,7 @@ export class ConnectionService {
    */
   static async fetchDeckConfigRest(): Promise<DeckConfig | null> {
     try {
-      const res = await fetch(`http://${this.config.host}:${this.config.port}/api/deck`);
+      const res = await fetch(`${this.baseUrl()}/api/deck`, { headers: this.authHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (data && data.pages) {
@@ -245,25 +298,35 @@ export class ConnectionService {
   }
 
   /**
-   * Check connection status via REST ping
+   * Probe the PC. `reachable` means InFlow answered; `authorized` means the token is accepted.
    */
-  static async testConnection(host: string, port: number): Promise<{ success: boolean; status?: ServerStatus; error?: string }> {
+  static async testConnection(
+    host: string,
+    port: number,
+    token?: string
+  ): Promise<{ success: boolean; reachable: boolean; authorized: boolean; status?: ServerStatus; error?: string }> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2500);
-
-      const res = await fetch(`http://${host}:${port}/api/status`, {
+      const res = await fetch(`${this.baseUrl(host, port)}/api/status`, {
         signal: controller.signal,
+        headers: this.authHeaders(token),
       });
-      clearTimeout(timeout);
-
-      if (res.ok) {
-        const status = await res.json();
-        return { success: true, status };
-      }
-      return { success: false, error: `HTTP ${res.status}` };
+      if (!res.ok) return { success: false, reachable: true, authorized: false, error: `HTTP ${res.status}` };
+      const status: ServerStatus = await res.json();
+      // Desktop 1.x had no pairing; treat its servers as authorized.
+      const authorized = status.auth_required ? !!status.authorized : true;
+      return {
+        success: authorized,
+        reachable: true,
+        authorized,
+        status,
+        error: authorized ? undefined : 'Pairing code was rejected. Scan the QR code again.',
+      };
     } catch (e: any) {
-      return { success: false, error: e?.message || 'Connection timed out' };
+      return { success: false, reachable: false, authorized: false, error: e?.message || 'Connection timed out' };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -302,6 +365,11 @@ export class ConnectionService {
   static onConnectionStateChange(listener: ConnectionStateListener): () => void {
     this.connectionStateListeners.add(listener);
     return () => this.connectionStateListeners.delete(listener);
+  }
+
+  static onLaunchResult(listener: LaunchResultListener): () => void {
+    this.launchResultListeners.add(listener);
+    return () => this.launchResultListeners.delete(listener);
   }
 
   private static notifyDeckUpdate(config: DeckConfig) {

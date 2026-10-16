@@ -27,6 +27,17 @@ export function normalizeToken(raw: string | undefined | null): string | undefin
   return clean || undefined;
 }
 
+/** Turns low-level network errors into something a user can act on. */
+export function describeNetworkError(e: any): string {
+  const raw = String(e?.message || e || '');
+  if (e?.name === 'AbortError') return 'Your PC did not respond. Check that InFlow is running and both devices share the same Wi-Fi.';
+  if (/cleartext/i.test(raw)) return 'This app build blocks local connections. Install the latest InFlow Companion build.';
+  if (/network request failed|failed to fetch|fetch failed|ECONNREFUSED|timed? ?out/i.test(raw)) {
+    return 'Could not reach your PC. Check the address, that InFlow is running, and that Windows Firewall allows it on private networks.';
+  }
+  return raw || 'Could not reach your PC.';
+}
+
 export class ConnectionService {
   private static ws: WebSocket | null = null;
   private static config: ConnectionConfig = { host: '127.0.0.1', port: 8080, autoConnect: true };
@@ -271,7 +282,7 @@ export class ConnectionService {
       const data = await res.json().catch(() => ({}));
       return { success: false, error: data.error || `HTTP error ${res.status}` };
     } catch (e: any) {
-      return { success: false, error: e?.name === 'AbortError' ? 'PC did not respond' : e?.message || 'Failed to reach PC server' };
+      return { success: false, error: describeNetworkError(e) };
     } finally {
       clearTimeout(timeout);
     }
@@ -324,7 +335,7 @@ export class ConnectionService {
         error: authorized ? undefined : 'Pairing code was rejected. Scan the QR code again.',
       };
     } catch (e: any) {
-      return { success: false, reachable: false, authorized: false, error: e?.message || 'Connection timed out' };
+      return { success: false, reachable: false, authorized: false, error: describeNetworkError(e) };
     } finally {
       clearTimeout(timeout);
     }

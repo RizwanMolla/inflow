@@ -120,6 +120,17 @@ npm --prefix mobile run web
 
 Then click **Pair phone** in the desktop app and scan the QR code from the companion app.
 
+### Showcase website (`website/`)
+
+React + Vite + GSAP landing page with download links. Links live in `website/src/config.ts`; they open the latest GitHub release until you point them at the uploaded installer/APK.
+
+```bash
+cd website
+npm install
+npm run dev      # http://localhost:5180
+npm run build    # static site in website/dist (works on GitHub Pages or any host)
+```
+
 ### Checks
 
 ```bash

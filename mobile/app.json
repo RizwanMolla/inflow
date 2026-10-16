@@ -15,7 +15,15 @@
         }
       ],
       "expo-font",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true
@@ -30,8 +38,7 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.rizwan711410.inflowmobile",
-      "usesCleartextTraffic": true
+      "package": "com.rizwan711410.inflowmobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"

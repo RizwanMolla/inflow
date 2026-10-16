@@ -46,7 +46,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
     const scored = items
       .map((item, order) => ({ item, s: score(item, words), order }))
       .filter((r) => r.s > 0);
-    if (words.length) scored.sort((a, b) => b.s - a.s || a.order - b.order);
+    if (words.length) {
+      // Keep each group contiguous (so headings never repeat), ranking groups by their best match.
+      const best = new Map<string, number>();
+      for (const r of scored) best.set(r.item.group, Math.max(best.get(r.item.group) ?? 0, r.s));
+      scored.sort(
+        (a, b) =>
+          (best.get(b.item.group) ?? 0) - (best.get(a.item.group) ?? 0) ||
+          a.item.group.localeCompare(b.item.group) ||
+          b.s - a.s ||
+          a.order - b.order
+      );
+    }
     return scored.map((r) => r.item).slice(0, 60);
   }, [items, query]);
 

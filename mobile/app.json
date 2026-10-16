@@ -30,7 +30,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.rizwan711410.inflowmobile"
+      "package": "com.rizwan711410.inflowmobile",
+      "usesCleartextTraffic": true
     },
     "web": {
       "favicon": "./assets/favicon.png"

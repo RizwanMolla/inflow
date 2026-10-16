@@ -438,7 +438,7 @@ function Footer() {
           <img src="./logo.png" alt="" />
           InFlow
         </a>
-        <span>Built with Tauri, Rust, React and Expo · MIT License</span>
+        <span>Built with Tauri, Rust, React and Expo · All Rights Reserved</span>
         <a href={REPO_URL} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <GitHubIcon size={15} />
           Source on GitHub

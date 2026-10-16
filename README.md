@@ -9,7 +9,7 @@
 Design a grid of keys on the desktop, pair your phone once, and every tap runs on your PC:<br/>
 whole workspaces, apps, hotkeys, typed snippets, media keys or shell commands.
 
-[**Download**](https://github.com/RizwanMolla/inflow/releases/latest) · [Features](#-the-windows-app) · [Mobile app](#-the-mobile-companion) · [How it works](#-how-it-works)
+[**Website**](https://inflow-deck.vercel.app/) · [**Download**](https://github.com/RizwanMolla/inflow/releases/latest) · [Features](#-the-windows-app) · [Mobile app](#-the-mobile-companion) · [How it works](#-how-it-works)
 
 Tauri v2 · Rust · React 19 · TypeScript · Tailwind CSS v4 · React Native (Expo)
 
@@ -189,7 +189,7 @@ npm --prefix mobile run web
 cd mobile && eas build -p android --profile preview
 ```
 
-**Showcase website.** Links live in `website/src/config.ts`; they open the latest GitHub release until you point them at the uploaded installer/APK.
+**Showcase website.** Live at [inflow-deck.vercel.app](https://inflow-deck.vercel.app/). Links live in `website/src/config.ts`; they open the latest GitHub release until you point them at the uploaded installer/APK.
 
 ```bash
 cd website
@@ -208,6 +208,8 @@ cd src-tauri && cargo test         # hotkey parsing & pairing token tests
 
 ---
 
-## 📄 License
+## 📄 License & Terms
 
-MIT License.
+Copyright © 2026 Rizwan Molla. All rights reserved.
+
+This is a personal project published for portfolio demonstration purposes only. The source code, assets, and design may not be copied, distributed, modified, or used for commercial purposes without explicit permission.

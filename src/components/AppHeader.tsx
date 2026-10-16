@@ -1,5 +1,5 @@
 import React from 'react';
-import { CircleHelp, Download, Plus, QrCode, Search, Sparkles, Upload, Zap } from 'lucide-react';
+import { CircleHelp, Download, Plus, QrCode, Search, Sparkles, Upload } from 'lucide-react';
 import type { LiveTone } from './DeckCanvas';
 
 interface AppHeaderProps {
@@ -36,9 +36,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   return (
     <header className="flex-shrink-0 z-30 h-14 px-4 flex items-center justify-between gap-4 border-b border-line bg-surface/80 backdrop-blur-xl">
       <div className="flex items-center gap-2.5 min-w-0">
-        <div className="w-8 h-8 rounded-[10px] bg-gradient-to-b from-red-500 to-red-600 flex items-center justify-center shadow-[0_4px_14px_-4px_rgb(239_68_68/0.7),inset_0_1px_0_rgb(255_255_255/0.25)]">
-          <Zap className="w-3.5 h-3.5 text-white fill-white" />
-        </div>
+        <img
+          src="/logo.png"
+          alt="InFlow"
+          className="w-8 h-8 rounded-[10px] object-cover shadow-[0_4px_14px_-4px_rgb(239_68_68/0.4)]"
+        />
         <div className="leading-tight">
           <h1 className="text-[15px] font-semibold tracking-tight">InFlow</h1>
           <p className="text-micro text-ink-3">{isTauri ? 'Deck studio' : 'Browser simulator'}</p>

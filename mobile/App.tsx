@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -229,9 +229,11 @@ function MainApp() {
 
       <View style={styles.header}>
         <View style={styles.brand}>
-          <View style={styles.logo}>
-            <Zap size={16} color="#ffffff" fill="#ffffff" />
-          </View>
+          <Image
+            source={require('./assets/icon.png')}
+            style={styles.logo}
+            resizeMode="cover"
+          />
           <View>
             <AppText variant="base" style={styles.brandName}>
               InFlow
